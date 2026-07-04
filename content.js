@@ -371,27 +371,22 @@
   // ---- crop overlay drag-select -------------------------------------------
   function setupCropOverlay() {
     const overlay = bodyEl.querySelector("#pd-crop-overlay");
-    if (!overlay) return;
+    const wrap = bodyEl.querySelector("#pd-canvas-wrap");
+    if (!overlay || !wrap) return;
+
     let dragging = false;
     let startX = 0, startY = 0;
     let selDiv = null;
+    let lastClientX = 0, lastClientY = 0;
+    let scrollRaf = null;
 
-    overlay.addEventListener("mousedown", (e) => {
-      const rect = overlay.getBoundingClientRect();
-      startX = e.clientX - rect.left;
-      startY = e.clientY - rect.top;
-      dragging = true;
-      if (selDiv) selDiv.remove();
-      selDiv = document.createElement("div");
-      selDiv.className = "pd-selection";
-      overlay.appendChild(selDiv);
-    });
+    const EDGE = 36; // px from the visible edge that triggers auto-scroll
+    const SPEED = 14; // px scrolled per frame at max proximity
 
-    overlay.addEventListener("mousemove", (e) => {
-      if (!dragging || !selDiv) return;
+    function updateSelectionFromClient(clientX, clientY) {
       const rect = overlay.getBoundingClientRect();
-      const curX = e.clientX - rect.left;
-      const curY = e.clientY - rect.top;
+      const curX = clientX - rect.left;
+      const curY = clientY - rect.top;
       const x = Math.min(startX, curX);
       const y = Math.min(startY, curY);
       const w = Math.abs(curX - startX);
@@ -401,6 +396,47 @@
       selDiv.style.width = w + "px";
       selDiv.style.height = h + "px";
       state.selection = { x, y, w, h };
+    }
+
+    function autoScrollTick() {
+      if (!dragging) { scrollRaf = null; return; }
+      const wrapRect = wrap.getBoundingClientRect();
+      let dx = 0, dy = 0;
+
+      if (lastClientX < wrapRect.left + EDGE) dx = -SPEED * ((wrapRect.left + EDGE - lastClientX) / EDGE);
+      else if (lastClientX > wrapRect.right - EDGE) dx = SPEED * ((lastClientX - (wrapRect.right - EDGE)) / EDGE);
+
+      if (lastClientY < wrapRect.top + EDGE) dy = -SPEED * ((wrapRect.top + EDGE - lastClientY) / EDGE);
+      else if (lastClientY > wrapRect.bottom - EDGE) dy = SPEED * ((lastClientY - (wrapRect.bottom - EDGE)) / EDGE);
+
+      if (dx !== 0 || dy !== 0) {
+        wrap.scrollLeft += dx;
+        wrap.scrollTop += dy;
+        updateSelectionFromClient(lastClientX, lastClientY);
+      }
+      scrollRaf = requestAnimationFrame(autoScrollTick);
+    }
+
+    overlay.addEventListener("mousedown", (e) => {
+      const rect = overlay.getBoundingClientRect();
+      startX = e.clientX - rect.left;
+      startY = e.clientY - rect.top;
+      lastClientX = e.clientX;
+      lastClientY = e.clientY;
+      dragging = true;
+      if (selDiv) selDiv.remove();
+      selDiv = document.createElement("div");
+      selDiv.className = "pd-selection";
+      overlay.appendChild(selDiv);
+      if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScrollTick);
+      e.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging || !selDiv) return;
+      lastClientX = e.clientX;
+      lastClientY = e.clientY;
+      updateSelectionFromClient(e.clientX, e.clientY);
     });
 
     window.addEventListener("mouseup", () => {

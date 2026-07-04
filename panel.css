@@ -162,8 +162,9 @@
   background: #0e0f16;
   border: 1px solid #262735;
   max-height: 46vh;
-  display:flex;
-  justify-content:center;
+  display: flex;
+  justify-content: center; /* fallback for browsers without "safe" support */
+  justify-content: safe center; /* prevents unreachable overflow on the left/top */
 }
 .pd-canvas-wrap canvas { display:block; }
 #pd-crop-overlay {
