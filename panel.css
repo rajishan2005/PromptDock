@@ -169,6 +169,7 @@
 .pd-canvas-wrap canvas { display:block; }
 #pd-crop-overlay {
   position:absolute; top:0; left:0; cursor: crosshair;
+  overflow: hidden;
 }
 .pd-selection {
   position:absolute;

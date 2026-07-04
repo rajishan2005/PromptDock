@@ -380,13 +380,26 @@
     let lastClientX = 0, lastClientY = 0;
     let scrollRaf = null;
 
-    const EDGE = 36; // px from the visible edge that triggers auto-scroll
-    const SPEED = 14; // px scrolled per frame at max proximity
+    const EDGE = 30;   // px from the visible edge that triggers auto-scroll
+    const SPEED = 7;    // max px scrolled per frame, right at the very edge
+
+    // Converts a viewport (clientX/Y) position into overlay-local coordinates
+    // that stay correct regardless of current scroll position. wrap's own
+    // bounding rect never moves (only its *content* scrolls), so anchoring to
+    // it — plus the live scroll offset — avoids the feedback loop you'd get
+    // from re-measuring the overlay's rect after every auto-scroll step.
+    function toOverlayLocal(clientX, clientY) {
+      const wrapRect = wrap.getBoundingClientRect();
+      const rawX = clientX - wrapRect.left + wrap.scrollLeft;
+      const rawY = clientY - wrapRect.top + wrap.scrollTop;
+      // Clamp to the actual page bounds so a selection can never exceed it.
+      const x = Math.max(0, Math.min(rawX, overlay.clientWidth));
+      const y = Math.max(0, Math.min(rawY, overlay.clientHeight));
+      return { x, y };
+    }
 
     function updateSelectionFromClient(clientX, clientY) {
-      const rect = overlay.getBoundingClientRect();
-      const curX = clientX - rect.left;
-      const curY = clientY - rect.top;
+      const { x: curX, y: curY } = toOverlayLocal(clientX, clientY);
       const x = Math.min(startX, curX);
       const y = Math.min(startY, curY);
       const w = Math.abs(curX - startX);
@@ -403,24 +416,36 @@
       const wrapRect = wrap.getBoundingClientRect();
       let dx = 0, dy = 0;
 
-      if (lastClientX < wrapRect.left + EDGE) dx = -SPEED * ((wrapRect.left + EDGE - lastClientX) / EDGE);
-      else if (lastClientX > wrapRect.right - EDGE) dx = SPEED * ((lastClientX - (wrapRect.right - EDGE)) / EDGE);
+      if (lastClientX < wrapRect.left + EDGE) {
+        const t = (wrapRect.left + EDGE - lastClientX) / EDGE; // 0..1
+        dx = -SPEED * t * t; // eased — slow to start, quicker only right at the edge
+      } else if (lastClientX > wrapRect.right - EDGE) {
+        const t = (lastClientX - (wrapRect.right - EDGE)) / EDGE;
+        dx = SPEED * t * t;
+      }
 
-      if (lastClientY < wrapRect.top + EDGE) dy = -SPEED * ((wrapRect.top + EDGE - lastClientY) / EDGE);
-      else if (lastClientY > wrapRect.bottom - EDGE) dy = SPEED * ((lastClientY - (wrapRect.bottom - EDGE)) / EDGE);
+      if (lastClientY < wrapRect.top + EDGE) {
+        const t = (wrapRect.top + EDGE - lastClientY) / EDGE;
+        dy = -SPEED * t * t;
+      } else if (lastClientY > wrapRect.bottom - EDGE) {
+        const t = (lastClientY - (wrapRect.bottom - EDGE)) / EDGE;
+        dy = SPEED * t * t;
+      }
 
       if (dx !== 0 || dy !== 0) {
-        wrap.scrollLeft += dx;
-        wrap.scrollTop += dy;
+        const maxLeft = wrap.scrollWidth - wrap.clientWidth;
+        const maxTop = wrap.scrollHeight - wrap.clientHeight;
+        wrap.scrollLeft = Math.max(0, Math.min(maxLeft, wrap.scrollLeft + dx));
+        wrap.scrollTop = Math.max(0, Math.min(maxTop, wrap.scrollTop + dy));
         updateSelectionFromClient(lastClientX, lastClientY);
       }
       scrollRaf = requestAnimationFrame(autoScrollTick);
     }
 
     overlay.addEventListener("mousedown", (e) => {
-      const rect = overlay.getBoundingClientRect();
-      startX = e.clientX - rect.left;
-      startY = e.clientY - rect.top;
+      const { x, y } = toOverlayLocal(e.clientX, e.clientY);
+      startX = x;
+      startY = y;
       lastClientX = e.clientX;
       lastClientY = e.clientY;
       dragging = true;
