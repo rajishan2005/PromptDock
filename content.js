@@ -233,7 +233,7 @@
           .map(
             (q, i) => `
         <div class="pd-question-item">
-          <span class="pd-q-tag">Q${q.number} · p.${q.page}</span>
+          <span class="pd-q-tag">Q${q.number}${q.unit ? " · " + escapeHtml(q.unit) : ""} · p.${q.page}</span>
           <div class="pd-question-text">${escapeHtml(q.text)}</div>
           <div class="pd-question-actions">
             <button class="pd-btn pd-btn-primary" data-idx="${i}" data-action="send">Send to Chat</button>
@@ -504,18 +504,31 @@
   // body text (measurements, options, etc.) don't get mistaken for a new
   // question — a line only starts a new question if it continues the
   // sequence (or is the very first match found).
+  // Detects unit/section header lines (e.g. "UNIT-1", "UNIT 5", "Unit-III") so
+  // numbering resets there instead of continuing from the previous unit.
+  const UNIT_HEADER = /^UNIT[\s\-.]*([IVXLC\d]+)\b/i;
+
   function extractQuestions(lineEntries) {
     const found = [];
     let current = null;
     let expected = null;
+    let unit = null;
 
     lineEntries.forEach(({ line, page }) => {
+      const unitMatch = line.match(UNIT_HEADER);
+      if (unitMatch) {
+        if (current) { found.push(current); current = null; }
+        expected = null;
+        unit = line.trim();
+        return;
+      }
+
       const m = line.match(Q_START);
       const num = m ? parseInt(m[1], 10) : null;
 
       if (m && (expected === null || num === expected)) {
         if (current) found.push(current);
-        current = { number: num, text: line.slice(m[0].length).trim(), page };
+        current = { number: num, text: line.slice(m[0].length).trim(), page, unit };
         expected = num + 1;
       } else if (current) {
         current.text += " " + line;
