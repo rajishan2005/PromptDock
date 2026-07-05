@@ -167,6 +167,30 @@
   justify-content: safe center; /* prevents unreachable overflow on the left/top */
 }
 .pd-canvas-wrap canvas { display:block; }
+
+/* slim, dark-themed scrollbars instead of the bulky OS default */
+.pd-canvas-wrap {
+  scrollbar-width: thin;              /* Firefox */
+  scrollbar-color: #3a3b52 #15161f;   /* Firefox: thumb / track */
+}
+.pd-canvas-wrap::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+.pd-canvas-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pd-canvas-wrap::-webkit-scrollbar-thumb {
+  background: #3a3b52;
+  border-radius: 6px;
+  border: 2px solid #15161f;
+}
+.pd-canvas-wrap::-webkit-scrollbar-thumb:hover {
+  background: #4a4b66;
+}
+.pd-canvas-wrap::-webkit-scrollbar-corner {
+  background: transparent;
+}
 #pd-crop-overlay {
   position:absolute; top:0; left:0; cursor: crosshair;
   overflow: hidden;
