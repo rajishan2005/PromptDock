@@ -26,9 +26,11 @@
     renderTask: null,
     selection: null, // {x,y,w,h} in css px, relative to canvas
     cropBlob: null,
-    questions: [], // {number, text, page}
+    questions: [], // {number, text, page, unit}
     scanning: false,
     activeTab: "pdf",
+    overlay: null, // null | "library" | "chats"
+    autosolve: { running: false, index: 0, status: "" },
   };
 
   // ---- helpers to find the ChatGPT composer -------------------------------
@@ -123,6 +125,8 @@
     <div class="pd-header">
       <div class="pd-logo">P</div>
       <h1>PromptDock</h1>
+      <button class="pd-icon-btn" id="pd-lib-btn" title="PDF library">📚</button>
+      <button class="pd-icon-btn" id="pd-chats-btn" title="Saved chat links">🔗</button>
       <button class="pd-close" id="pd-close" title="Close">✕</button>
     </div>
     <div class="pd-tabs">
@@ -247,10 +251,17 @@
     bodyEl.innerHTML = `
       <div class="pd-card">
         <div class="pd-card-title">Extract questions</div>
-        <button class="pd-btn pd-btn-secondary" id="pd-scan-page" ${state.scanning ? "disabled" : ""}>Scan current page (p.${state.pageNum})</button>
+        <button class="pd-btn pd-btn-secondary" id="pd-scan-page" ${state.scanning || state.autosolve.running ? "disabled" : ""}>Scan current page (p.${state.pageNum})</button>
         <div style="height:8px"></div>
-        <button class="pd-btn pd-btn-ghost" id="pd-scan-all" ${state.scanning ? "disabled" : ""}>Scan entire PDF (${state.numPages} pages)</button>
+        <button class="pd-btn pd-btn-ghost" id="pd-scan-all" ${state.scanning || state.autosolve.running ? "disabled" : ""}>Scan entire PDF (${state.numPages} pages)</button>
         ${state.scanning ? `<div style="height:8px"></div><div class="pd-scan-progress" id="pd-scan-progress">Scanning…</div>` : ""}
+      </div>
+      <div class="pd-card">
+        <div class="pd-card-title">Autosolve</div>
+        <button class="pd-btn ${state.autosolve.running ? "pd-btn-secondary" : "pd-btn-primary"}" id="pd-autosolve-toggle" ${state.questions.length === 0 ? "disabled" : ""}>
+          ${state.autosolve.running ? "⏹ Stop Autosolve" : "▶ Start Autosolve"}
+        </button>
+        <div class="pd-hint" id="pd-autosolve-status">${state.autosolve.status || "Sends each detected question one by one, waits for ChatGPT to finish answering, then a 5s cooldown before the next."}</div>
       </div>
       <div class="pd-card">
         <div class="pd-card-title">Detected questions (${state.questions.length})</div>
@@ -260,6 +271,10 @@
 
     bodyEl.querySelector("#pd-scan-page").addEventListener("click", () => scanQuestions(false));
     bodyEl.querySelector("#pd-scan-all").addEventListener("click", () => scanQuestions(true));
+    bodyEl.querySelector("#pd-autosolve-toggle").addEventListener("click", () => {
+      if (state.autosolve.running) stopAutosolve();
+      else startAutosolve();
+    });
 
     bodyEl.querySelectorAll("[data-action]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -277,14 +292,188 @@
     return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // ---- PDF library (chrome.storage.local) ----------------------------------
+  async function saveToLibrary({ name, size, numPages, dataUrl }) {
+    const id = `${Date.now()}`;
+    const key = `pdfLib:${id}`;
+    const { pdfLibIndex = [] } = await chrome.storage.local.get("pdfLibIndex");
+    pdfLibIndex.push(id);
+    await chrome.storage.local.set({
+      [key]: { id, name, size, numPages, dataUrl, addedAt: Date.now() },
+      pdfLibIndex,
+    });
+  }
+
+  async function deleteLibraryEntry(id) {
+    const key = `pdfLib:${id}`;
+    const { pdfLibIndex = [] } = await chrome.storage.local.get("pdfLibIndex");
+    await chrome.storage.local.remove(key);
+    await chrome.storage.local.set({ pdfLibIndex: pdfLibIndex.filter((x) => x !== id) });
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function loadPdfFromDataUrl(dataUrl, name) {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const file = new File([blob], name, { type: "application/pdf" });
+    await loadPdf(file, { persist: false });
+  }
+
+  async function renderLibraryOverlay() {
+    bodyEl.innerHTML = `<div class="pd-card"><div class="pd-card-title">Loading library…</div></div>`;
+    let entries = [];
+    try {
+      const { pdfLibIndex = [] } = await chrome.storage.local.get("pdfLibIndex");
+      const keys = pdfLibIndex.map((id) => `pdfLib:${id}`);
+      const res = keys.length ? await chrome.storage.local.get(keys) : {};
+      entries = pdfLibIndex.map((id) => res[`pdfLib:${id}`]).filter(Boolean).reverse();
+    } catch (e) {
+      console.error("[PromptDock] library load failed:", e);
+    }
+
+    const listHtml = entries.length
+      ? entries
+          .map(
+            (e) => `
+        <div class="pd-file-row" style="margin-bottom:8px">
+          <div class="pd-file-icon">📄</div>
+          <div class="pd-file-meta">
+            <div class="pd-file-name">${escapeHtml(e.name)}</div>
+            <div class="pd-file-sub">${e.numPages ? e.numPages + " pages · " : ""}${(e.size / (1024 * 1024)).toFixed(1)} MB · ${new Date(e.addedAt).toLocaleDateString()}</div>
+          </div>
+          <button class="pd-icon-btn" data-open="${e.id}" title="Open" style="color:#b18cff">📂</button>
+          <button class="pd-icon-btn" data-del="${e.id}" title="Delete">🗑</button>
+        </div>`
+          )
+          .join("")
+      : `<div class="pd-empty">No PDFs saved yet — anything you upload gets added here automatically.</div>`;
+
+    bodyEl.innerHTML = `
+      <div class="pd-hint" style="margin:0 0 4px 0">← click a tab above to go back</div>
+      <div class="pd-card">
+        <div class="pd-card-title">Your PDF library (${entries.length})</div>
+        ${listHtml}
+      </div>
+    `;
+
+    bodyEl.querySelectorAll("[data-open]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.open;
+        const key = `pdfLib:${id}`;
+        const res = await chrome.storage.local.get(key);
+        const entry = res[key];
+        if (!entry) { showToast("Could not find that file."); return; }
+        btn.textContent = "…";
+        try {
+          await loadPdfFromDataUrl(entry.dataUrl, entry.name);
+          state.overlay = null;
+          state.activeTab = "pdf";
+          syncTabButtons();
+          render();
+        } catch (e) {
+          console.error("[PromptDock] failed to open library PDF:", e);
+          showToast("Couldn't open that PDF.");
+        }
+      });
+    });
+    bodyEl.querySelectorAll("[data-del]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await deleteLibraryEntry(btn.dataset.del);
+        renderLibraryOverlay();
+      });
+    });
+  }
+
+  // ---- saved chat links -----------------------------------------------------
+  async function saveCurrentChatLink() {
+    const { chatLinks = [] } = await chrome.storage.local.get("chatLinks");
+    chatLinks.push({
+      id: `${Date.now()}`,
+      url: window.location.href,
+      pdfName: state.fileName || null,
+      page: state.pdfDoc ? state.pageNum : null,
+      savedAt: Date.now(),
+    });
+    await chrome.storage.local.set({ chatLinks });
+    showToast("Chat link saved ✓");
+    renderChatsOverlay();
+  }
+
+  async function renderChatsOverlay() {
+    bodyEl.innerHTML = `<div class="pd-card"><div class="pd-card-title">Loading…</div></div>`;
+    const { chatLinks = [] } = await chrome.storage.local.get("chatLinks");
+    const ordered = chatLinks.slice().reverse();
+
+    const listHtml = ordered.length
+      ? ordered
+          .map(
+            (c) => `
+        <div class="pd-file-row" style="margin-bottom:8px; align-items:flex-start">
+          <div class="pd-file-icon">🔗</div>
+          <div class="pd-file-meta">
+            <div class="pd-file-name">${escapeHtml(c.pdfName || "Untitled")}${c.page ? " · p." + c.page : ""}</div>
+            <div class="pd-file-sub">${new Date(c.savedAt).toLocaleString()}</div>
+          </div>
+          <button class="pd-icon-btn" data-open-chat="${c.id}" title="Open chat" style="color:#b18cff">↗</button>
+          <button class="pd-icon-btn" data-del-chat="${c.id}" title="Delete">🗑</button>
+        </div>`
+          )
+          .join("")
+      : `<div class="pd-empty">No saved chats yet.</div>`;
+
+    bodyEl.innerHTML = `
+      <div class="pd-hint" style="margin:0 0 4px 0">← click a tab above to go back</div>
+      <div class="pd-card">
+        <div class="pd-card-title">Save this chat</div>
+        <button class="pd-btn pd-btn-primary" id="pd-save-current-chat">🔗 Save current chat link</button>
+        <div class="pd-hint">Saves this tab's link, tagged to ${state.fileName ? "<b>" + escapeHtml(state.fileName) + "</b>" : "the currently loaded PDF"}${state.pdfDoc ? " (page " + state.pageNum + ")" : ""}, so you can jump straight back to the module + its answers later.</div>
+      </div>
+      <div class="pd-card">
+        <div class="pd-card-title">Saved chats (${ordered.length})</div>
+        ${listHtml}
+      </div>
+    `;
+
+    bodyEl.querySelector("#pd-save-current-chat").addEventListener("click", saveCurrentChatLink);
+    bodyEl.querySelectorAll("[data-open-chat]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entry = ordered.find((c) => c.id === btn.dataset.openChat);
+        if (entry) window.open(entry.url, "_blank");
+      });
+    });
+    bodyEl.querySelectorAll("[data-del-chat]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const { chatLinks: current = [] } = await chrome.storage.local.get("chatLinks");
+        const next = current.filter((c) => c.id !== btn.dataset.delChat);
+        await chrome.storage.local.set({ chatLinks: next });
+        renderChatsOverlay();
+      });
+    });
+  }
+
   function render() {
+    if (state.overlay === "library") { renderLibraryOverlay(); return; }
+    if (state.overlay === "chats") { renderChatsOverlay(); return; }
     if (state.activeTab === "pdf") renderPdfTab();
     else renderQuestionsTab();
+  }
+
+  function syncTabButtons() {
+    root.querySelectorAll(".pd-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === state.activeTab));
   }
 
   // ---- tab switching ---------------------------------------------------
   root.querySelectorAll(".pd-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
+      state.overlay = null;
       root.querySelectorAll(".pd-tab").forEach((t) => t.classList.remove("active"));
       tab.classList.add("active");
       state.activeTab = tab.dataset.tab;
@@ -293,6 +482,8 @@
   });
 
   root.querySelector("#pd-close").addEventListener("click", () => root.classList.add("pd-hidden"));
+  root.querySelector("#pd-lib-btn").addEventListener("click", () => { state.overlay = "library"; render(); });
+  root.querySelector("#pd-chats-btn").addEventListener("click", () => { state.overlay = "chats"; render(); });
   fab.addEventListener("click", () => root.classList.toggle("pd-hidden"));
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -300,7 +491,8 @@
   });
 
   // ---- PDF loading & rendering --------------------------------------------
-  async function loadPdf(file) {
+  async function loadPdf(file, opts = {}) {
+    const { persist = true } = opts;
     state.fileName = file.name;
     state.fileSize = file.size;
     const buf = await file.arrayBuffer();
@@ -311,10 +503,23 @@
     state.selection = null;
     state.cropBlob = null;
     state.questions = [];
+    state.hqCache = null;
+    stopAutosolve();
     render();
+
+    if (persist) {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        await saveToLibrary({ name: file.name, size: file.size, numPages: state.numPages, dataUrl });
+      } catch (e) {
+        console.warn("[PromptDock] could not save PDF to library:", e);
+        showToast("Loaded, but couldn't save to library (storage may be full).");
+      }
+    }
   }
 
   function resetPdf() {
+    stopAutosolve();
     state.pdfDoc = null;
     state.fileName = "";
     state.numPages = 0;
@@ -541,6 +746,128 @@
     };
   }
 
+  // ---- autosolve --------------------------------------------------------
+  const AUTOSOLVE_COOLDOWN_MS = 5000;
+
+  function getStopButton() {
+    return (
+      document.querySelector('[data-testid="stop-button"]') ||
+      document.querySelector('button[aria-label="Stop generating"]') ||
+      document.querySelector('button[aria-label*="Stop"]')
+    );
+  }
+
+  function isGenerating() {
+    return !!getStopButton();
+  }
+
+  function submitMessage() {
+    const sendBtn =
+      document.querySelector('[data-testid="send-button"]') ||
+      document.querySelector('button[aria-label="Send prompt"]') ||
+      document.querySelector('button[aria-label*="Send"]');
+    if (sendBtn && !sendBtn.disabled) {
+      sendBtn.click();
+      return true;
+    }
+    const editor = getEditor();
+    if (!editor) return false;
+    ["keydown", "keypress", "keyup"].forEach((type) => {
+      editor.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    });
+    return true;
+  }
+
+  // Polls checkFn until it's true, or bails early if abortFn() becomes true,
+  // or gives up after `timeout` ms — whichever comes first.
+  function waitForCondition(checkFn, { timeout = 120000, interval = 400, abortFn = () => false } = {}) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        if (abortFn()) return resolve(false);
+        if (checkFn()) return resolve(true);
+        if (Date.now() - start > timeout) return resolve(false);
+        setTimeout(tick, interval);
+      };
+      tick();
+    });
+  }
+
+  function interruptibleSleep(ms, abortFn) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        if (abortFn() || Date.now() - start >= ms) return resolve();
+        setTimeout(tick, 200);
+      };
+      tick();
+    });
+  }
+
+  function updateAutosolveStatus(msg) {
+    state.autosolve.status = msg;
+    const el = bodyEl.querySelector("#pd-autosolve-status");
+    if (el) el.textContent = msg;
+  }
+
+  function startAutosolve() {
+    if (state.autosolve.running || state.questions.length === 0) return;
+    if (state.autosolve.index >= state.questions.length) state.autosolve.index = 0;
+    state.autosolve.running = true;
+    render();
+    autosolveLoop();
+  }
+
+  function stopAutosolve() {
+    if (!state.autosolve.running) return;
+    state.autosolve.running = false;
+    state.autosolve.status = "Stopped.";
+    render();
+  }
+
+  async function autosolveLoop() {
+    const a = state.autosolve;
+    const notRunning = () => !state.autosolve.running;
+
+    while (a.running && a.index < state.questions.length) {
+      const q = state.questions[a.index];
+      const label = `Q${q.number}${q.unit ? " · " + q.unit : ""} (p.${q.page})`;
+      updateAutosolveStatus(`Sending ${label}…`);
+
+      try {
+        insertTextToChat(q.text);
+        await interruptibleSleep(300, notRunning);
+        if (!a.running) break;
+
+        const sent = submitMessage();
+        if (!sent) throw new Error("Could not find the send button or chat box");
+
+        updateAutosolveStatus(`Waiting for ChatGPT to answer ${label}…`);
+        // Give it a moment to start generating; if it never seems to start,
+        // don't get stuck — fall through to the completion wait anyway.
+        await waitForCondition(isGenerating, { timeout: 8000, interval: 300, abortFn: notRunning });
+        await waitForCondition(() => !isGenerating(), { timeout: 120000, interval: 500, abortFn: notRunning });
+      } catch (e) {
+        console.warn("[PromptDock] autosolve: skipping question", q.number, e);
+        showToast(`Skipped ${label} — couldn't send or detect a reply.`);
+      }
+
+      a.index += 1;
+      if (!a.running) break;
+
+      if (a.index < state.questions.length) {
+        updateAutosolveStatus(`Cooling down 5s before the next question…`);
+        await interruptibleSleep(AUTOSOLVE_COOLDOWN_MS, notRunning);
+      }
+    }
+
+    const finished = a.index >= state.questions.length;
+    a.running = false;
+    a.status = finished ? "Autosolve complete ✓" : "Stopped.";
+    if (finished) a.index = 0;
+    render();
+  }
+
   // ---- question extraction -------------------------------------------------
   // Matches "1. text", "1) text", "Q1. text", and bare table-style "1  text"
   // (a number in its own column, no punctuation, followed by whitespace + a
@@ -617,6 +944,8 @@
         lines.forEach((line) => lineEntries.push({ line, page: state.pageNum }));
       }
       state.questions = extractQuestions(lineEntries);
+      state.autosolve.index = 0;
+      state.autosolve.status = "";
       if (state.questions.length === 0) {
         showToast("No numbered questions detected on this page.");
       }
