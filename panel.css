@@ -292,3 +292,23 @@
 @keyframes pd-spin { to { transform: rotate(360deg); } }
 
 .pd-scan-progress { font-size: 11.5px; color:#8a8a99; text-align:center; }
+
+.pd-footer {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 9px 12px;
+  font-size: 10.5px;
+  color: #55566a;
+  border-top: 1px solid #1f2029;
+  background: #15161f;
+  letter-spacing: .01em;
+}
+.pd-footer a {
+  color: #8a7bc4;
+  text-decoration: none;
+  font-weight: 600;
+}
+.pd-footer a:hover {
+  color: #b18cff;
+  text-decoration: underline;
+}

@@ -134,6 +134,9 @@
       <button class="pd-tab" data-tab="questions">Questions</button>
     </div>
     <div class="pd-body" id="pd-body"></div>
+    <div class="pd-footer">
+      For the students, by a student — <a href="https://www.instagram.com/ifo.ish" target="_blank" rel="noopener noreferrer">Ishan</a>
+    </div>
   `;
   document.body.appendChild(root);
 
