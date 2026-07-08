@@ -960,5 +960,10 @@
     render();
   }
 
+  // Render the initial view right away (even while hidden) so the very first
+  // time the panel is opened, the dropzone/tab content is already there and
+  // fully interactive — no "warm-up" click needed before it responds.
+  render();
+
   // done — panel is ready but hidden until the toolbar icon or FAB is clicked.
 })();
