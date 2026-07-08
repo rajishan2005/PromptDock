@@ -30,7 +30,7 @@
     scanning: false,
     activeTab: "pdf",
     overlay: null, // null | "library" | "chats"
-    autosolve: { running: false, index: 0, status: "" },
+    autosolve: { running: false, index: 0, status: "", startedAt: null },
   };
 
   // ---- helpers to find the ChatGPT composer -------------------------------
@@ -264,7 +264,7 @@
         <button class="pd-btn ${state.autosolve.running ? "pd-btn-secondary" : "pd-btn-primary"}" id="pd-autosolve-toggle" ${state.questions.length === 0 ? "disabled" : ""}>
           ${state.autosolve.running ? "⏹ Stop Autosolve" : "▶ Start Autosolve"}
         </button>
-        <div class="pd-hint" id="pd-autosolve-status">${state.autosolve.status || "Sends each detected question one by one, waits for ChatGPT to finish answering, then a 5s cooldown before the next."}</div>
+        <div class="pd-hint" id="pd-autosolve-status">${state.autosolve.status || "Sends each detected question one by one, waits for ChatGPT to finish answering, then a 3s cooldown before the next."}</div>
       </div>
       <div class="pd-card">
         <div class="pd-card-title">Detected questions (${state.questions.length})</div>
@@ -750,7 +750,7 @@
   }
 
   // ---- autosolve --------------------------------------------------------
-  const AUTOSOLVE_COOLDOWN_MS = 5000;
+  const AUTOSOLVE_COOLDOWN_MS = 3000;
 
   function getStopButton() {
     return (
@@ -813,10 +813,19 @@
     if (el) el.textContent = msg;
   }
 
+  function formatDuration(ms) {
+    const totalSec = Math.round(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    if (m === 0) return `${s}s`;
+    return `${m}m ${s}s`;
+  }
+
   function startAutosolve() {
     if (state.autosolve.running || state.questions.length === 0) return;
     if (state.autosolve.index >= state.questions.length) state.autosolve.index = 0;
     state.autosolve.running = true;
+    state.autosolve.startedAt = Date.now();
     render();
     autosolveLoop();
   }
@@ -859,14 +868,17 @@
       if (!a.running) break;
 
       if (a.index < state.questions.length) {
-        updateAutosolveStatus(`Cooling down 5s before the next question…`);
+        updateAutosolveStatus(`Cooling down 3s before the next question…`);
         await interruptibleSleep(AUTOSOLVE_COOLDOWN_MS, notRunning);
       }
     }
 
     const finished = a.index >= state.questions.length;
+    const elapsed = a.startedAt ? Date.now() - a.startedAt : null;
     a.running = false;
-    a.status = finished ? "Autosolve complete ✓" : "Stopped.";
+    a.status = finished
+      ? `Autosolve complete ✓ — took ${formatDuration(elapsed)} for ${state.questions.length} question${state.questions.length === 1 ? "" : "s"}.`
+      : `Stopped${elapsed !== null ? ` after ${formatDuration(elapsed)}` : ""}.`;
     if (finished) a.index = 0;
     render();
   }
