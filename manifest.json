@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "PromptDock — PDF Crop & Extract for ChatGPT",
   "version": "1.0.0",
-  "description": "Upload a question-bank PDF, crop any question straight into the ChatGPT chat box, or extract questions as text — no screenshots needed.",
+  "description": "Crop questions from any PDF into ChatGPT, extract them as text, and auto-send them one by one.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
