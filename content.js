@@ -18,7 +18,7 @@
   // ---- question bank store config ------------------------------------------
   // TODO: update these once the public question-bank repo exists.
   // Expected folder layout inside that repo: Stream/Semester/Subject/file.pdf
-  const QBANK_REPO = { owner: "rajishan2005", repo: "promptdock-qbanks", branch: "main" };
+  const QBANK_REPO = { owner: "rajishan2005", repo: "pdqb", branch: "main" };
 
   // ---- state --------------------------------------------------------------
   const state = {
