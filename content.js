@@ -545,6 +545,29 @@
     }
   }
 
+  // Saves the file straight to the user's device (a real download), separate
+  // from "load into PromptDock" — some people just want the PDF itself.
+  async function saveQbankToDevice(fileEntry) {
+    showToast(`Saving ${fileEntry.name} to your device…`);
+    try {
+      const res = await fetch(fileEntry.download_url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileEntry.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      showToast(`${fileEntry.name} saved ✓`);
+    } catch (e) {
+      console.error("[PromptDock] qbank save-to-device failed:", e);
+      showToast("Couldn't save that file.");
+    }
+  }
+
   async function renderStoreOverlay() {
     bodyEl.innerHTML = `<div class="pd-card"><div class="pd-card-title">Loading store…</div></div>`;
 
@@ -592,7 +615,8 @@
             <div class="pd-file-name">${escapeHtml(f.name)}</div>
             <div class="pd-file-sub">${(f.size / (1024 * 1024)).toFixed(1)} MB</div>
           </div>
-          <button class="pd-icon-btn" data-download="${escapeHtml(f.path)}" title="Download &amp; load" style="color:#b18cff">⬇</button>
+          <button class="pd-icon-btn" data-download="${escapeHtml(f.path)}" title="Load into PromptDock" style="color:#b18cff">📂</button>
+          <button class="pd-icon-btn" data-save="${escapeHtml(f.path)}" title="Save to device" style="color:#b18cff">⬇</button>
         </div>`
       )
       .join("");
@@ -633,6 +657,12 @@
       btn.addEventListener("click", () => {
         const entry = files.find((f) => f.path === btn.dataset.download);
         if (entry) downloadAndLoadQbank(entry);
+      });
+    });
+    bodyEl.querySelectorAll("[data-save]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entry = files.find((f) => f.path === btn.dataset.save);
+        if (entry) saveQbankToDevice(entry);
       });
     });
   }
