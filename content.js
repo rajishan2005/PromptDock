@@ -15,9 +15,15 @@
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("libs/pdf.worker.min.js");
   }
 
+  // ---- question bank store config ------------------------------------------
+  // TODO: update these once the public question-bank repo exists.
+  // Expected folder layout inside that repo: Stream/Semester/Subject/file.pdf
+  const QBANK_REPO = { owner: "rajishan2005", repo: "promptdock-qbanks", branch: "main" };
+
   // ---- state --------------------------------------------------------------
   const state = {
     pdfDoc: null,
+    currentFile: null, // the actual File object, kept so we can attach it to the chat
     fileName: "",
     fileSize: 0,
     pageNum: 1,
@@ -29,8 +35,17 @@
     questions: [], // {number, text, page, unit}
     scanning: false,
     activeTab: "pdf",
-    overlay: null, // null | "library" | "chats"
-    autosolve: { running: false, index: 0, status: "", startedAt: null },
+    overlay: null, // null | "library" | "chats" | "store"
+    storeNav: { stream: null, sem: null, subject: null },
+    storeCache: {},
+    autosolve: {
+      running: false,
+      index: 0,
+      status: "",
+      startedAt: null,
+      usePdfContext: true, // ON by default — answers grounded in the uploaded PDF
+      customInstructions: "",
+    },
   };
 
   // ---- helpers to find the ChatGPT composer -------------------------------
@@ -57,19 +72,20 @@
     showToast._timer = setTimeout(() => t.classList.remove("pd-show"), 2200);
   }
 
-  function insertImageToChat(blob) {
+  // Attaches any File (image, PDF, etc.) to the ChatGPT composer by emulating
+  // a paste (primary) or a drag-and-drop (fallback) — the same mechanism a
+  // real user's clipboard paste or file drop would trigger.
+  function attachFileToChat(file, { toastMsg = "Sent to ChatGPT ✓" } = {}) {
     const editor = getEditor();
     if (!editor) {
       showToast("Couldn't find the ChatGPT chat box — click into it once, then retry.");
-      return;
+      return false;
     }
-    const file = new File([blob], `promptdock-crop-${Date.now()}.png`, { type: "image/png" });
     const dt = new DataTransfer();
     dt.items.add(file);
 
     editor.focus();
 
-    // Primary path: emulate a paste, which ChatGPT's composer already handles for images.
     try {
       const pasteEvent = new ClipboardEvent("paste", {
         clipboardData: dt,
@@ -81,7 +97,6 @@
       /* constructor not supported in this context — fall through to drop */
     }
 
-    // Fallback path: emulate a drag-and-drop, which ChatGPT also supports for uploads.
     const dropTarget = editor.closest("form") || editor.parentElement || document.body;
     ["dragenter", "dragover", "drop"].forEach((type) => {
       try {
@@ -92,7 +107,13 @@
       }
     });
 
-    showToast("Crop sent to ChatGPT ✓");
+    showToast(toastMsg);
+    return true;
+  }
+
+  function insertImageToChat(blob) {
+    const file = new File([blob], `promptdock-crop-${Date.now()}.png`, { type: "image/png" });
+    attachFileToChat(file, { toastMsg: "Crop sent to ChatGPT ✓" });
   }
 
   function insertTextToChat(text) {
@@ -127,6 +148,7 @@
       <h1>PromptDock</h1>
       <button class="pd-icon-btn" id="pd-lib-btn" title="PDF library">📚</button>
       <button class="pd-icon-btn" id="pd-chats-btn" title="Saved chat links">🔗</button>
+      <button class="pd-icon-btn" id="pd-store-btn" title="Question bank store">🏪</button>
       <button class="pd-close" id="pd-close" title="Close">✕</button>
     </div>
     <div class="pd-tabs">
@@ -261,6 +283,25 @@
       </div>
       <div class="pd-card">
         <div class="pd-card-title">Autosolve</div>
+
+        <div class="pd-toggle-row">
+          <div>
+            <div class="pd-toggle-label">Answer based on this PDF</div>
+            <div class="pd-toggle-sublabel">Uploads the PDF first so ChatGPT answers from it, not general knowledge.</div>
+          </div>
+          <button class="pd-toggle ${state.autosolve.usePdfContext ? "pd-toggle-on" : "pd-toggle-off"}" id="pd-toggle-context" ${state.autosolve.running ? "disabled" : ""} role="switch" aria-checked="${state.autosolve.usePdfContext}">
+            <span class="pd-toggle-knob"></span>
+          </button>
+        </div>
+
+        <textarea
+          class="pd-textarea"
+          id="pd-custom-instructions"
+          placeholder="Any other instructions? (optional) — e.g. only key points, keep it a summary"
+          ${state.autosolve.running ? "disabled" : ""}
+        >${escapeHtml(state.autosolve.customInstructions)}</textarea>
+
+        <div style="height:10px"></div>
         <button class="pd-btn ${state.autosolve.running ? "pd-btn-secondary" : "pd-btn-primary"}" id="pd-autosolve-toggle" ${state.questions.length === 0 ? "disabled" : ""}>
           ${state.autosolve.running ? "⏹ Stop Autosolve" : "▶ Start Autosolve"}
         </button>
@@ -274,6 +315,13 @@
 
     bodyEl.querySelector("#pd-scan-page").addEventListener("click", () => scanQuestions(false));
     bodyEl.querySelector("#pd-scan-all").addEventListener("click", () => scanQuestions(true));
+    bodyEl.querySelector("#pd-toggle-context").addEventListener("click", () => {
+      state.autosolve.usePdfContext = !state.autosolve.usePdfContext;
+      render();
+    });
+    bodyEl.querySelector("#pd-custom-instructions").addEventListener("input", (e) => {
+      state.autosolve.customInstructions = e.target.value;
+    });
     bodyEl.querySelector("#pd-autosolve-toggle").addEventListener("click", () => {
       if (state.autosolve.running) stopAutosolve();
       else startAutosolve();
@@ -462,9 +510,137 @@
     });
   }
 
+  // ---- question bank store (browses a public GitHub repo of PDFs) ----------
+  async function fetchQbankDir(path) {
+    const cacheKey = path || "__root__";
+    if (state.storeCache[cacheKey]) return state.storeCache[cacheKey];
+    const url = `https://api.github.com/repos/${QBANK_REPO.owner}/${QBANK_REPO.repo}/contents/${path}?ref=${QBANK_REPO.branch}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      if (res.status === 404) throw new Error("Store repo/folder not found — check QBANK_REPO in content.js.");
+      if (res.status === 403) throw new Error("Rate-limited by GitHub — try again shortly.");
+      throw new Error(`GitHub API error (${res.status})`);
+    }
+    const data = await res.json();
+    state.storeCache[cacheKey] = data;
+    return data;
+  }
+
+  async function downloadAndLoadQbank(fileEntry) {
+    showToast(`Downloading ${fileEntry.name}…`);
+    try {
+      const res = await fetch(fileEntry.download_url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const file = new File([blob], fileEntry.name, { type: "application/pdf" });
+      await loadPdf(file, { persist: true });
+      state.overlay = null;
+      state.activeTab = "pdf";
+      syncTabButtons();
+      render();
+      showToast(`${fileEntry.name} loaded ✓`);
+    } catch (e) {
+      console.error("[PromptDock] qbank download failed:", e);
+      showToast("Couldn't download that file.");
+    }
+  }
+
+  async function renderStoreOverlay() {
+    bodyEl.innerHTML = `<div class="pd-card"><div class="pd-card-title">Loading store…</div></div>`;
+
+    const nav = state.storeNav;
+    const path = [nav.stream, nav.sem, nav.subject].filter(Boolean).join("/");
+
+    let entries;
+    try {
+      entries = await fetchQbankDir(path);
+    } catch (e) {
+      bodyEl.innerHTML = `
+        <div class="pd-hint" style="margin:0 0 4px 0">← click a tab above to go back</div>
+        <div class="pd-card">
+          <div class="pd-card-title">Question bank store</div>
+          <div class="pd-empty">Store isn't connected yet.<br>${escapeHtml(e.message)}</div>
+        </div>
+      `;
+      return;
+    }
+
+    const dirs = entries.filter((e) => e.type === "dir").sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries.filter((e) => e.type === "file" && e.name.toLowerCase().endsWith(".pdf"));
+
+    const crumbs = ["All streams", nav.stream, nav.sem, nav.subject].filter(Boolean);
+    const breadcrumbHtml = crumbs
+      .map(
+        (part, i) =>
+          `<span data-crumb="${i}" style="cursor:pointer; ${i === crumbs.length - 1 ? "color:#e7e7ee;font-weight:600;" : "color:#b18cff;"}">${escapeHtml(part)}</span>`
+      )
+      .join(`<span style="color:#55566a"> / </span>`);
+
+    const dirsHtml = dirs
+      .map(
+        (d) =>
+          `<button class="pd-btn pd-btn-secondary" data-dir="${escapeHtml(d.name)}" style="text-align:left; justify-content:flex-start; margin-bottom:6px">📁 ${escapeHtml(d.name)}</button>`
+      )
+      .join("");
+
+    const filesHtml = files
+      .map(
+        (f) => `
+        <div class="pd-file-row" style="margin-bottom:8px">
+          <div class="pd-file-icon">📄</div>
+          <div class="pd-file-meta">
+            <div class="pd-file-name">${escapeHtml(f.name)}</div>
+            <div class="pd-file-sub">${(f.size / (1024 * 1024)).toFixed(1)} MB</div>
+          </div>
+          <button class="pd-icon-btn" data-download="${escapeHtml(f.path)}" title="Download &amp; load" style="color:#b18cff">⬇</button>
+        </div>`
+      )
+      .join("");
+
+    const emptyMsg = !dirs.length && !files.length ? `<div class="pd-empty">Nothing here yet.</div>` : "";
+
+    bodyEl.innerHTML = `
+      <div class="pd-hint" style="margin:0 0 4px 0">← click a tab above to go back</div>
+      <div class="pd-card">
+        <div class="pd-card-title">Question bank store</div>
+        <div class="pd-hint" style="margin-bottom:10px">${breadcrumbHtml}</div>
+        ${dirsHtml}
+        ${emptyMsg}
+      </div>
+      ${files.length ? `<div class="pd-card"><div class="pd-card-title">Files (${files.length})</div>${filesHtml}</div>` : ""}
+    `;
+
+    bodyEl.querySelectorAll("[data-dir]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!nav.stream) nav.stream = btn.dataset.dir;
+        else if (!nav.sem) nav.sem = btn.dataset.dir;
+        else if (!nav.subject) nav.subject = btn.dataset.dir;
+        renderStoreOverlay();
+      });
+    });
+
+    bodyEl.querySelectorAll("[data-crumb]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const i = +el.dataset.crumb;
+        if (i === 0) { nav.stream = null; nav.sem = null; nav.subject = null; }
+        else if (i === 1) { nav.sem = null; nav.subject = null; }
+        else if (i === 2) { nav.subject = null; }
+        renderStoreOverlay();
+      });
+    });
+
+    bodyEl.querySelectorAll("[data-download]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const entry = files.find((f) => f.path === btn.dataset.download);
+        if (entry) downloadAndLoadQbank(entry);
+      });
+    });
+  }
+
   function render() {
     if (state.overlay === "library") { renderLibraryOverlay(); return; }
     if (state.overlay === "chats") { renderChatsOverlay(); return; }
+    if (state.overlay === "store") { renderStoreOverlay(); return; }
     if (state.activeTab === "pdf") renderPdfTab();
     else renderQuestionsTab();
   }
@@ -487,6 +663,7 @@
   root.querySelector("#pd-close").addEventListener("click", () => root.classList.add("pd-hidden"));
   root.querySelector("#pd-lib-btn").addEventListener("click", () => { state.overlay = "library"; render(); });
   root.querySelector("#pd-chats-btn").addEventListener("click", () => { state.overlay = "chats"; render(); });
+  root.querySelector("#pd-store-btn").addEventListener("click", () => { state.overlay = "store"; state.storeNav = { stream: null, sem: null, subject: null }; render(); });
   fab.addEventListener("click", () => root.classList.toggle("pd-hidden"));
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -496,6 +673,7 @@
   // ---- PDF loading & rendering --------------------------------------------
   async function loadPdf(file, opts = {}) {
     const { persist = true } = opts;
+    state.currentFile = file;
     state.fileName = file.name;
     state.fileSize = file.size;
     const buf = await file.arrayBuffer();
@@ -524,6 +702,7 @@
   function resetPdf() {
     stopAutosolve();
     state.pdfDoc = null;
+    state.currentFile = null;
     state.fileName = "";
     state.numPages = 0;
     state.pageNum = 1;
@@ -840,6 +1019,35 @@
   async function autosolveLoop() {
     const a = state.autosolve;
     const notRunning = () => !state.autosolve.running;
+
+    // Prime the chat with the PDF + any custom instructions, but only once,
+    // at the very start of a fresh run — not when resuming after a stop.
+    if (a.running && a.index === 0 && a.usePdfContext) {
+      if (!state.currentFile) {
+        showToast("No PDF file available to attach — continuing without PDF context.");
+      } else {
+        updateAutosolveStatus("Uploading PDF for context…");
+        const attached = attachFileToChat(state.currentFile, { toastMsg: "PDF attached for context ✓" });
+        if (attached) {
+          await interruptibleSleep(400, notRunning);
+          const instruction =
+            "Answer all of the following questions based on this PDF only." +
+            (a.customInstructions.trim() ? " " + a.customInstructions.trim() : "");
+          insertTextToChat(instruction);
+          await interruptibleSleep(300, notRunning);
+          const sent = submitMessage();
+          if (sent) {
+            updateAutosolveStatus("Waiting for ChatGPT to process the PDF…");
+            // PDFs can take longer to process than a normal reply, so allow more time.
+            await waitForCondition(isGenerating, { timeout: 15000, interval: 300, abortFn: notRunning });
+            await waitForCondition(() => !isGenerating(), { timeout: 180000, interval: 500, abortFn: notRunning });
+            if (a.running) await interruptibleSleep(AUTOSOLVE_COOLDOWN_MS, notRunning);
+          } else {
+            showToast("Couldn't submit the PDF context message — continuing anyway.");
+          }
+        }
+      }
+    }
 
     while (a.running && a.index < state.questions.length) {
       const q = state.questions[a.index];

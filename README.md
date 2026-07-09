@@ -6,7 +6,10 @@ A Chrome/Brave extension that docks a clean panel onto chatgpt.com so you can:
 2. **Crop** any question directly from the PDF preview and send it into the ChatGPT chat box as an image — no screenshot tool needed. Works at any zoom level (crops are always rendered at high resolution), and auto-scrolls as you drag near an edge so you can select something bigger than the visible area.
 3. **Extract questions** — auto-detects numbered questions (`1.`, `2)`, `Q1.`, or bare table-style numbering) from the PDF text, resets numbering at each `UNIT` header, and lets you send any one straight into the chat as text with one click.
 4. **Autosolve** — sends every detected question to ChatGPT one after another automatically: types it in, submits it, waits for ChatGPT to finish answering, cools down 3 seconds, then moves to the next. Visible Start/Stop control; if a question fails to send or a reply can't be detected, it's skipped and the run continues rather than stopping. Shows the total time taken once the whole run finishes.
-5. **Saved chat links** (🔗 button in the header) — save the current ChatGPT conversation's URL, tagged to whichever PDF + page you were on, so you can jump straight back to a module and its answers later.
+   - **Answer based on this PDF** toggle (on by default) — before the questions start, uploads the actual PDF into the chat with an instruction to answer only from it, so replies are grounded in your material instead of ChatGPT's general knowledge.
+   - **Custom instructions box** (optional) — anything typed here (e.g. "only key points", "keep it a summary") is appended to that same priming message.
+5. **Question bank store** (🏪 button in the header) — browse a shared library of question-bank PDFs organized by stream → semester → subject, hosted in a public GitHub repo, and load any of them straight into PromptDock with one click.
+6. **Saved chat links** (🔗 button in the header) — save the current ChatGPT conversation's URL, tagged to whichever PDF + page you were on, so you can jump straight back to a module and its answers later.
 
 ## Install (unpacked, ~30 seconds)
 
@@ -21,7 +24,24 @@ A Chrome/Brave extension that docks a clean panel onto chatgpt.com so you can:
 - **PDF & Crop tab:** upload/drop your PDF (or reopen one from 📚 **PDF library**), use the ‹ › and −/+ controls to navigate and zoom, then **drag directly over a question** in the preview to select it. Drag near an edge while zoomed in and it'll auto-pan for you. A "Cropped selection" card appears below — hit **Insert Crop to Chat** to drop it straight into the ChatGPT input as an image, ready to send.
 - **Questions tab:** hit **Scan current page** for a quick pass, or **Scan entire PDF** to index everything. Each detected question shows with a **Send to Chat** button (inserts as text) or **Copy**. Use **Start Autosolve** to have it work through the whole list unattended — **Stop Autosolve** cancels it at any point, taking effect within about a second even mid-wait.
 - **📚 PDF library (header button):** every PDF you upload is saved here automatically (full file, stored locally) so you can reopen it without hunting for the file again. Delete any entry you don't want kept.
+- **🏪 Question bank store (header button):** browse by stream → semester → subject and load a shared PDF straight in with one click. This reads a public GitHub repo live — see "Setting up the question bank store" below if you're maintaining that repo.
 - **🔗 Saved chats (header button):** save the current tab's ChatGPT link, tagged to the PDF/page you were working from. Click any saved entry to reopen that conversation in a new tab.
+
+## Setting up the question bank store (maintainer note)
+
+The store browses a **public GitHub repo** live via GitHub's API — no server, no database, just folders of PDFs.
+
+1. Create a public repo (e.g. `promptdock-qbanks`).
+2. Organize it as `Stream/Semester/Subject/file.pdf`, for example:
+   ```
+   ISE/Sem3/Digital-Electronics/qbank.pdf
+   CSE/Sem4/DBMS/qbank.pdf
+   ```
+3. In `content.js`, update the `QBANK_REPO` constant near the top to point at that repo:
+   ```js
+   const QBANK_REPO = { owner: "your-username", repo: "promptdock-qbanks", branch: "main" };
+   ```
+4. That's it — adding a new question bank later is just uploading a PDF into the right folder on GitHub's website. No code changes, no redeploy.
 
 ## Notes / limitations
 

@@ -291,6 +291,58 @@
 }
 @keyframes pd-spin { to { transform: rotate(360deg); } }
 
+.pd-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.pd-toggle-label { font-size: 12.5px; font-weight: 600; color: #e7e7ee; }
+.pd-toggle-sublabel { font-size: 11px; color: #8a8a99; margin-top: 2px; }
+
+.pd-toggle {
+  flex-shrink: 0;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  border: none;
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+  transition: background .15s ease;
+}
+.pd-toggle-on { background: #22c55e; }
+.pd-toggle-off { background: #4b3a3a; }
+.pd-toggle:disabled { opacity: .5; cursor: default; }
+.pd-toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left .15s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+.pd-toggle-on .pd-toggle-knob { left: 21px; }
+
+.pd-textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  background: #201f30;
+  border: 1px solid #2c2d3d;
+  border-radius: 9px;
+  padding: 9px 10px;
+  color: #e7e7ee;
+  font: 12.5px/1.4 -apple-system, "Segoe UI", Inter, sans-serif;
+}
+.pd-textarea::placeholder { color: #6f6f80; }
+.pd-textarea:focus { outline: none; border-color: #6d28d9; }
+.pd-textarea:disabled { opacity: .5; }
+
 .pd-scan-progress { font-size: 11.5px; color:#8a8a99; text-align:center; }
 
 .pd-footer {
