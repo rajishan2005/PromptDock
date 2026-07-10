@@ -1323,6 +1323,42 @@
     return found;
   }
 
+  // Fallback for question banks that use bullets/arrows instead of numbers
+  // (➤, ➢, •, -, or symbol-font glyphs that PDFs often extract as unusual
+  // characters). Matches any short non-word leading marker followed by a
+  // capital letter, and — since there's no number to validate a sequence
+  // against — trusts every match as a new question, numbering them 1..n
+  // ourselves purely for display.
+  const BULLET_START = /^[^\w\s]{1,2}\s+(?=[A-Z(])/;
+
+  function extractBulletQuestions(lineEntries) {
+    const found = [];
+    let current = null;
+    let unit = null;
+    let n = 0;
+
+    lineEntries.forEach(({ line, page }) => {
+      const unitMatch = line.match(UNIT_HEADER);
+      if (unitMatch) {
+        if (current) { found.push(current); current = null; }
+        unit = line.trim();
+        return;
+      }
+
+      const m = line.match(BULLET_START);
+      if (m) {
+        if (current) found.push(current);
+        n += 1;
+        current = { number: n, text: line.slice(m[0].length).trim(), page, unit };
+      } else if (current) {
+        current.text += " " + line;
+      }
+    });
+
+    if (current) found.push(current);
+    return found;
+  }
+
   async function scanQuestions(allPages) {
     state.scanning = true;
     render();
@@ -1340,10 +1376,17 @@
         lines.forEach((line) => lineEntries.push({ line, page: state.pageNum }));
       }
       state.questions = extractQuestions(lineEntries);
+      let usedBulletFallback = false;
+      if (state.questions.length === 0) {
+        state.questions = extractBulletQuestions(lineEntries);
+        usedBulletFallback = state.questions.length > 0;
+      }
       state.autosolve.index = 0;
       state.autosolve.status = "";
       if (state.questions.length === 0) {
-        showToast("No numbered questions detected on this page.");
+        showToast("No questions detected on this page.");
+      } else if (usedBulletFallback) {
+        showToast("Detected bullet-style questions (no numbering found).");
       }
     } catch (e) {
       console.error("[PromptDock] scan failed:", e);
