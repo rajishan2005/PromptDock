@@ -40,6 +40,7 @@
     storeCache: {},
     autosolve: {
       running: false,
+      confirming: false,
       index: 0,
       status: "",
       startedAt: null,
@@ -284,12 +285,15 @@
       <div class="pd-card">
         <div class="pd-card-title">Autosolve</div>
 
+        ${
+          state.autosolve.confirming
+            ? `
         <div class="pd-toggle-row">
           <div>
             <div class="pd-toggle-label">Answer based on this PDF</div>
             <div class="pd-toggle-sublabel">Uploads the PDF first so ChatGPT answers from it, not general knowledge.</div>
           </div>
-          <button class="pd-toggle ${state.autosolve.usePdfContext ? "pd-toggle-on" : "pd-toggle-off"}" id="pd-toggle-context" ${state.autosolve.running ? "disabled" : ""} role="switch" aria-checked="${state.autosolve.usePdfContext}">
+          <button class="pd-toggle ${state.autosolve.usePdfContext ? "pd-toggle-on" : "pd-toggle-off"}" id="pd-toggle-context" role="switch" aria-checked="${state.autosolve.usePdfContext}">
             <span class="pd-toggle-knob"></span>
           </button>
         </div>
@@ -298,14 +302,20 @@
           class="pd-textarea"
           id="pd-custom-instructions"
           placeholder="Any other instructions? (optional) — e.g. only key points, keep it a summary"
-          ${state.autosolve.running ? "disabled" : ""}
         >${escapeHtml(state.autosolve.customInstructions)}</textarea>
 
         <div style="height:10px"></div>
+        <button class="pd-btn pd-btn-primary" id="pd-autosolve-confirm">▶ Start</button>
+        <div style="height:8px"></div>
+        <button class="pd-btn pd-btn-secondary" id="pd-autosolve-cancel">Cancel</button>
+        `
+            : `
         <button class="pd-btn ${state.autosolve.running ? "pd-btn-secondary" : "pd-btn-primary"}" id="pd-autosolve-toggle" ${state.questions.length === 0 ? "disabled" : ""}>
           ${state.autosolve.running ? "⏹ Stop Autosolve" : "▶ Start Autosolve"}
         </button>
         <div class="pd-hint" id="pd-autosolve-status">${state.autosolve.status || "Sends each detected question one by one, waits for ChatGPT to finish answering, then a 3s cooldown before the next."}</div>
+        `
+        }
       </div>
       <div class="pd-card">
         <div class="pd-card-title">Detected questions (${state.questions.length})</div>
@@ -315,17 +325,29 @@
 
     bodyEl.querySelector("#pd-scan-page").addEventListener("click", () => scanQuestions(false));
     bodyEl.querySelector("#pd-scan-all").addEventListener("click", () => scanQuestions(true));
-    bodyEl.querySelector("#pd-toggle-context").addEventListener("click", () => {
-      state.autosolve.usePdfContext = !state.autosolve.usePdfContext;
-      render();
-    });
-    bodyEl.querySelector("#pd-custom-instructions").addEventListener("input", (e) => {
-      state.autosolve.customInstructions = e.target.value;
-    });
-    bodyEl.querySelector("#pd-autosolve-toggle").addEventListener("click", () => {
-      if (state.autosolve.running) stopAutosolve();
-      else startAutosolve();
-    });
+
+    if (state.autosolve.confirming) {
+      bodyEl.querySelector("#pd-toggle-context").addEventListener("click", () => {
+        state.autosolve.usePdfContext = !state.autosolve.usePdfContext;
+        render();
+      });
+      bodyEl.querySelector("#pd-custom-instructions").addEventListener("input", (e) => {
+        state.autosolve.customInstructions = e.target.value;
+      });
+      bodyEl.querySelector("#pd-autosolve-confirm").addEventListener("click", () => {
+        state.autosolve.confirming = false;
+        startAutosolve();
+      });
+      bodyEl.querySelector("#pd-autosolve-cancel").addEventListener("click", () => {
+        state.autosolve.confirming = false;
+        render();
+      });
+    } else {
+      bodyEl.querySelector("#pd-autosolve-toggle").addEventListener("click", () => {
+        if (state.autosolve.running) stopAutosolve();
+        else { state.autosolve.confirming = true; render(); }
+      });
+    }
 
     bodyEl.querySelectorAll("[data-action]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -1040,6 +1062,7 @@
   }
 
   function stopAutosolve() {
+    state.autosolve.confirming = false;
     if (!state.autosolve.running) return;
     state.autosolve.running = false;
     state.autosolve.status = "Stopped.";
