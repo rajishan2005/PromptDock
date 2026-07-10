@@ -111,6 +111,102 @@
   margin: 0 0 8px 0;
 }
 
+.pd-autosolve-title {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.pd-autosolve-title:hover { color: #b18cff; }
+.pd-autosolve-caret {
+  color: #b18cff;
+  font-size: 10px;
+  font-weight: 700;
+}
+.pd-autosolve-details {
+  margin-top: 10px;
+}
+.pd-autosolve-running {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #2c2d3d;
+  border-radius: 9px;
+  background: #201f30;
+}
+.pd-autosolve-running-large {
+  padding: 14px;
+  min-height: 112px;
+}
+.pd-autosolve-running-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #f1ecff;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.pd-autosolve-running-large .pd-autosolve-running-row {
+  font-size: 14px;
+}
+.pd-bouncing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+}
+.pd-bouncing-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b18cff;
+  animation: pd-dot-bounce .75s ease-in-out infinite;
+}
+.pd-bouncing-dots i:nth-child(2) { animation-delay: .12s; }
+.pd-bouncing-dots i:nth-child(3) { animation-delay: .24s; }
+.pd-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 9px;
+  color: #9b9bab;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.pd-autosolve-running-large .pd-progress-meta {
+  margin-top: 16px;
+  font-size: 12px;
+}
+.pd-progress-track {
+  height: 7px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #151621;
+  border: 1px solid #2c2d3d;
+}
+.pd-autosolve-running-large .pd-progress-track {
+  height: 10px;
+  margin-top: 9px;
+}
+.pd-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #b18cff);
+  transition: width .25s ease;
+}
+@keyframes pd-dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: .45; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+
 .pd-dropzone {
   border: 1.5px dashed #34364a;
   border-radius: 10px;
@@ -217,6 +313,7 @@
 }
 .pd-btn-primary { background: linear-gradient(135deg,#8b5cf6,#6d28d9); color: #fff; }
 .pd-btn-primary:hover { filter: brightness(1.08); }
+.pd-btn:disabled { opacity:.4; cursor:default; filter:none; }
 .pd-btn-primary:disabled { opacity:.4; cursor:default; filter:none; }
 .pd-btn-secondary { background: #232433; color: #e7e7ee; border: 1px solid #2c2d3d; }
 .pd-btn-secondary:hover { background:#2a2b3c; }

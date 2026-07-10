@@ -40,7 +40,7 @@
     storeCache: {},
     autosolve: {
       running: false,
-      confirming: false,
+      expanded: false,
       index: 0,
       status: "",
       startedAt: null,
@@ -73,6 +73,40 @@
     showToast._timer = setTimeout(() => t.classList.remove("pd-show"), 2200);
   }
 
+  function dispatchDragEvent(target, type, dataTransfer = null) {
+    try {
+      const evt = new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientX: 0,
+        clientY: 0,
+      });
+      target.dispatchEvent(evt);
+    } catch (e) {
+      /* ignore unsupported synthetic drag events */
+    }
+  }
+
+  function clearChatDropOverlay(dropTarget) {
+    const targets = [dropTarget, document.body, document.documentElement, document, window].filter(Boolean);
+    const clear = () => {
+      targets.forEach((target) => {
+        dispatchDragEvent(target, "dragleave");
+        dispatchDragEvent(target, "dragend");
+      });
+      try {
+        document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true }));
+      } catch (e) {
+        /* ignore unsupported synthetic keyboard events */
+      }
+    };
+
+    clear();
+    setTimeout(clear, 80);
+    setTimeout(clear, 300);
+  }
+
   // Attaches any File (image, PDF, etc.) to the ChatGPT composer by emulating
   // a paste (primary) or a drag-and-drop (fallback) — the same mechanism a
   // real user's clipboard paste or file drop would trigger.
@@ -99,14 +133,8 @@
     }
 
     const dropTarget = editor.closest("form") || editor.parentElement || document.body;
-    ["dragenter", "dragover", "drop"].forEach((type) => {
-      try {
-        const evt = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
-        dropTarget.dispatchEvent(evt);
-      } catch (e) {
-        /* ignore unsupported */
-      }
-    });
+    ["dragenter", "dragover", "drop"].forEach((type) => dispatchDragEvent(dropTarget, type, dt));
+    clearChatDropOverlay(dropTarget);
 
     showToast(toastMsg);
     return true;
@@ -251,10 +279,48 @@
 
   function renderQuestionsTab() {
     if (!state.pdfDoc) {
-      bodyEl.innerHTML = `<div class="pd-empty">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#8a8a99" stroke-width="1.5"><path d="M9 12h6M9 16h6M9 8h6M5 21V5a2 2 0 012-2h7l5 5v13a2 2 0 01-2 2H7a2 2 0 01-2-2z"/></svg>
-        Load a PDF in the <b>PDF &amp; Crop</b> tab first.
-      </div>`;
+      bodyEl.innerHTML = `
+        <div class="pd-card">
+          <div class="pd-card-title">Extract questions</div>
+          <button class="pd-btn pd-btn-secondary" disabled>Scan current page</button>
+          <div style="height:8px"></div>
+          <button class="pd-btn pd-btn-ghost" disabled>Scan entire PDF</button>
+          <div class="pd-hint">Load a PDF in the PDF &amp; Crop tab to unlock text extraction.</div>
+        </div>
+
+        <div class="pd-card pd-autosolve-card pd-autosolve-open">
+          <div class="pd-card-title">Autosolve</div>
+          <div class="pd-autosolve-details">
+            <div class="pd-toggle-row">
+              <div>
+                <div class="pd-toggle-label">Answer based on this PDF</div>
+                <div class="pd-toggle-sublabel">Uploads the PDF first so ChatGPT answers from it, not general knowledge.</div>
+              </div>
+              <button class="pd-toggle pd-toggle-on" disabled role="switch" aria-checked="true">
+                <span class="pd-toggle-knob"></span>
+              </button>
+            </div>
+
+            <textarea
+              class="pd-textarea"
+              placeholder="Any other instructions? (optional) - e.g. only key points, keep it a summary"
+              disabled
+            ></textarea>
+
+            <div style="height:10px"></div>
+          </div>
+          <button class="pd-btn pd-btn-primary" disabled>Start Autosolve</button>
+          <div class="pd-hint">Autosolve will appear here after questions are detected from a loaded PDF.</div>
+        </div>
+
+        <div class="pd-card">
+          <div class="pd-card-title">Detected questions (0)</div>
+          <div class="pd-empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#8a8a99" stroke-width="1.5"><path d="M9 12h6M9 16h6M9 8h6M5 21V5a2 2 0 012-2h7l5 5v13a2 2 0 01-2 2H7a2 2 0 01-2-2z"/></svg>
+            No PDF loaded yet.
+          </div>
+        </div>
+      `;
       return;
     }
 
@@ -274,6 +340,54 @@
           .join("")
       : `<div class="pd-empty">No questions extracted yet.</div>`;
 
+    const autosolveExpanded = state.autosolve.expanded || state.autosolve.running;
+    const autosolveTotal = state.questions.length;
+    const autosolveCurrent = state.autosolve.running && autosolveTotal
+      ? Math.min(state.autosolve.index + 1, autosolveTotal)
+      : Math.min(state.autosolve.index, autosolveTotal);
+    const autosolveProgress = autosolveTotal
+      ? Math.round((autosolveCurrent / autosolveTotal) * 100)
+      : 0;
+    const autosolveRunningHtml = state.autosolve.running
+      ? `
+        <div class="pd-autosolve-running pd-autosolve-running-large">
+          <div class="pd-autosolve-running-row">
+            <span>Autosolve is solving text</span>
+            <span class="pd-bouncing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          </div>
+          <div class="pd-progress-meta">
+            <span id="pd-autosolve-progress-label">Question ${autosolveCurrent} of ${autosolveTotal}</span>
+            <span id="pd-autosolve-progress-percent">${autosolveProgress}%</span>
+          </div>
+          <div class="pd-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="${autosolveTotal}" aria-valuenow="${autosolveCurrent}">
+            <div class="pd-progress-fill" id="pd-autosolve-progress-fill" style="width:${autosolveProgress}%"></div>
+          </div>
+        </div>`
+      : "";
+    const autosolveDetailsHtml = autosolveExpanded && !state.autosolve.running
+      ? `
+        <div class="pd-autosolve-details">
+          <div class="pd-toggle-row">
+            <div>
+              <div class="pd-toggle-label">Answer based on this PDF</div>
+              <div class="pd-toggle-sublabel">Uploads the PDF first so ChatGPT answers from it, not general knowledge.</div>
+            </div>
+            <button class="pd-toggle ${state.autosolve.usePdfContext ? "pd-toggle-on" : "pd-toggle-off"}" id="pd-toggle-context" ${state.autosolve.running ? "disabled" : ""} role="switch" aria-checked="${state.autosolve.usePdfContext}">
+              <span class="pd-toggle-knob"></span>
+            </button>
+          </div>
+
+          <textarea
+            class="pd-textarea"
+            id="pd-custom-instructions"
+            placeholder="Any other instructions? (optional) - e.g. only key points, keep it a summary"
+            ${state.autosolve.running ? "disabled" : ""}
+          >${escapeHtml(state.autosolve.customInstructions)}</textarea>
+
+          <div style="height:10px"></div>
+        </div>`
+      : "";
+
     bodyEl.innerHTML = `
       <div class="pd-card">
         <div class="pd-card-title">Extract questions</div>
@@ -282,40 +396,17 @@
         <button class="pd-btn pd-btn-ghost" id="pd-scan-all" ${state.scanning || state.autosolve.running ? "disabled" : ""}>Scan entire PDF (${state.numPages} pages)</button>
         ${state.scanning ? `<div style="height:8px"></div><div class="pd-scan-progress" id="pd-scan-progress">Scanning…</div>` : ""}
       </div>
-      <div class="pd-card">
-        <div class="pd-card-title">Autosolve</div>
-
-        ${
-          state.autosolve.confirming
-            ? `
-        <div class="pd-toggle-row">
-          <div>
-            <div class="pd-toggle-label">Answer based on this PDF</div>
-            <div class="pd-toggle-sublabel">Uploads the PDF first so ChatGPT answers from it, not general knowledge.</div>
-          </div>
-          <button class="pd-toggle ${state.autosolve.usePdfContext ? "pd-toggle-on" : "pd-toggle-off"}" id="pd-toggle-context" role="switch" aria-checked="${state.autosolve.usePdfContext}">
-            <span class="pd-toggle-knob"></span>
-          </button>
-        </div>
-
-        <textarea
-          class="pd-textarea"
-          id="pd-custom-instructions"
-          placeholder="Any other instructions? (optional) — e.g. only key points, keep it a summary"
-        >${escapeHtml(state.autosolve.customInstructions)}</textarea>
-
-        <div style="height:10px"></div>
-        <button class="pd-btn pd-btn-primary" id="pd-autosolve-confirm">▶ Start</button>
-        <div style="height:8px"></div>
-        <button class="pd-btn pd-btn-secondary" id="pd-autosolve-cancel">Cancel</button>
-        `
-            : `
-        <button class="pd-btn ${state.autosolve.running ? "pd-btn-secondary" : "pd-btn-primary"}" id="pd-autosolve-toggle" ${state.questions.length === 0 ? "disabled" : ""}>
-          ${state.autosolve.running ? "⏹ Stop Autosolve" : "▶ Start Autosolve"}
+      <div class="pd-card pd-autosolve-card ${autosolveExpanded ? "pd-autosolve-open" : ""}">
+        <button class="pd-card-title pd-autosolve-title" id="pd-autosolve-reveal" aria-expanded="${autosolveExpanded}">
+          <span>Autosolve</span>
+          <span class="pd-autosolve-caret">${autosolveExpanded ? "Hide" : "Options"}</span>
         </button>
-        <div class="pd-hint" id="pd-autosolve-status">${state.autosolve.status || "Sends each detected question one by one, waits for ChatGPT to finish answering, then a 3s cooldown before the next."}</div>
-        `
-        }
+        ${autosolveDetailsHtml}
+        ${autosolveRunningHtml}
+        <button class="pd-btn ${state.autosolve.running ? "pd-btn-secondary" : "pd-btn-primary"}" id="pd-autosolve-toggle" ${state.questions.length === 0 ? "disabled" : ""}>
+          ${state.autosolve.running ? "Stop Autosolve" : autosolveExpanded ? "Start Autosolve" : "Autosolve"}
+        </button>
+        ${autosolveExpanded ? `<div class="pd-hint" id="pd-autosolve-status">${state.autosolve.status || "Sends each detected question one by one, waits for ChatGPT to finish answering, then a 3s cooldown before the next."}</div>` : ""}
       </div>
       <div class="pd-card">
         <div class="pd-card-title">Detected questions (${state.questions.length})</div>
@@ -325,29 +416,28 @@
 
     bodyEl.querySelector("#pd-scan-page").addEventListener("click", () => scanQuestions(false));
     bodyEl.querySelector("#pd-scan-all").addEventListener("click", () => scanQuestions(true));
-
-    if (state.autosolve.confirming) {
-      bodyEl.querySelector("#pd-toggle-context").addEventListener("click", () => {
-        state.autosolve.usePdfContext = !state.autosolve.usePdfContext;
+    bodyEl.querySelector("#pd-autosolve-reveal").addEventListener("click", () => {
+      if (state.autosolve.running) return;
+      state.autosolve.expanded = !state.autosolve.expanded;
+      render();
+    });
+    bodyEl.querySelector("#pd-toggle-context")?.addEventListener("click", () => {
+      state.autosolve.usePdfContext = !state.autosolve.usePdfContext;
+      render();
+    });
+    bodyEl.querySelector("#pd-custom-instructions")?.addEventListener("input", (e) => {
+      state.autosolve.customInstructions = e.target.value;
+    });
+    bodyEl.querySelector("#pd-autosolve-toggle").addEventListener("click", () => {
+      if (state.autosolve.running) {
+        stopAutosolve();
+      } else if (!state.autosolve.expanded) {
+        state.autosolve.expanded = true;
         render();
-      });
-      bodyEl.querySelector("#pd-custom-instructions").addEventListener("input", (e) => {
-        state.autosolve.customInstructions = e.target.value;
-      });
-      bodyEl.querySelector("#pd-autosolve-confirm").addEventListener("click", () => {
-        state.autosolve.confirming = false;
+      } else {
         startAutosolve();
-      });
-      bodyEl.querySelector("#pd-autosolve-cancel").addEventListener("click", () => {
-        state.autosolve.confirming = false;
-        render();
-      });
-    } else {
-      bodyEl.querySelector("#pd-autosolve-toggle").addEventListener("click", () => {
-        if (state.autosolve.running) stopAutosolve();
-        else { state.autosolve.confirming = true; render(); }
-      });
-    }
+      }
+    });
 
     bodyEl.querySelectorAll("[data-action]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -548,10 +638,20 @@
     return data;
   }
 
+  function getQbankDownloadUrl(fileEntry) {
+    return (
+      fileEntry.download_url ||
+      `https://raw.githubusercontent.com/${QBANK_REPO.owner}/${QBANK_REPO.repo}/${QBANK_REPO.branch}/${fileEntry.path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`
+    );
+  }
+
   async function downloadAndLoadQbank(fileEntry) {
     showToast(`Downloading ${fileEntry.name}…`);
     try {
-      const res = await fetch(fileEntry.download_url);
+      const res = await fetch(getQbankDownloadUrl(fileEntry));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const file = new File([blob], fileEntry.name, { type: "application/pdf" });
@@ -572,7 +672,7 @@
   async function saveQbankToDevice(fileEntry) {
     showToast(`Saving ${fileEntry.name} to your device…`);
     try {
-      const res = await fetch(fileEntry.download_url);
+      const res = await fetch(getQbankDownloadUrl(fileEntry));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -613,7 +713,8 @@
     const dirs = entries.filter((e) => e.type === "dir").sort((a, b) => a.name.localeCompare(b.name));
     const files = entries.filter((e) => e.type === "file" && e.name.toLowerCase().endsWith(".pdf"));
 
-    const crumbs = ["All streams", nav.stream, nav.sem, nav.subject].filter(Boolean);
+    const rootLabel = !nav.stream && files.length && !dirs.length ? "All PDFs" : "All streams";
+    const crumbs = [rootLabel, nav.stream, nav.sem, nav.subject].filter(Boolean);
     const breadcrumbHtml = crumbs
       .map(
         (part, i) =>
@@ -1042,6 +1143,25 @@
     state.autosolve.status = msg;
     const el = bodyEl.querySelector("#pd-autosolve-status");
     if (el) el.textContent = msg;
+    updateAutosolveProgress();
+  }
+
+  function updateAutosolveProgress() {
+    const total = state.questions.length;
+    if (!total) return;
+    const current = state.autosolve.running
+      ? Math.min(state.autosolve.index + 1, total)
+      : Math.min(state.autosolve.index, total);
+    const percent = Math.round((current / total) * 100);
+    const label = bodyEl.querySelector("#pd-autosolve-progress-label");
+    const percentEl = bodyEl.querySelector("#pd-autosolve-progress-percent");
+    const fill = bodyEl.querySelector("#pd-autosolve-progress-fill");
+    const track = bodyEl.querySelector(".pd-progress-track");
+
+    if (label) label.textContent = `Question ${current} of ${total}`;
+    if (percentEl) percentEl.textContent = `${percent}%`;
+    if (fill) fill.style.width = `${percent}%`;
+    if (track) track.setAttribute("aria-valuenow", current);
   }
 
   function formatDuration(ms) {
@@ -1056,13 +1176,13 @@
     if (state.autosolve.running || state.questions.length === 0) return;
     if (state.autosolve.index >= state.questions.length) state.autosolve.index = 0;
     state.autosolve.running = true;
+    state.autosolve.expanded = true;
     state.autosolve.startedAt = Date.now();
     render();
     autosolveLoop();
   }
 
   function stopAutosolve() {
-    state.autosolve.confirming = false;
     if (!state.autosolve.running) return;
     state.autosolve.running = false;
     state.autosolve.status = "Stopped.";
