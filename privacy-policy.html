@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PromptDock — Privacy Policy</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+  h1 { font-size: 1.6em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; }
+  code { background: #f2f2f2; padding: 2px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>PromptDock — Privacy Policy</h1>
+<p><em>Last updated: July 2026</em></p>
+
+<p>PromptDock is a browser extension that adds a PDF viewing, cropping, and question-extraction panel to ChatGPT (chatgpt.com / chat.openai.com). This page explains what data the extension touches and what it does with it.</p>
+
+<h2>Summary</h2>
+<p><strong>PromptDock does not collect, transmit, or sell any personal data.</strong> Everything the extension does happens locally in your browser.</p>
+
+<h2>What data PromptDock handles, and where it stays</h2>
+<ul>
+  <li><strong>PDF files you upload</strong> are read and rendered entirely in your browser to show the preview, let you crop, and extract question text. If you leave the "save to library" behavior on, the file is stored using <code>chrome.storage.local</code> — a storage area that lives only on your own device. It is never uploaded to any server operated by PromptDock or its developer.</li>
+  <li><strong>Cropped question images</strong> are generated locally and inserted directly into the ChatGPT chat box you're already using — they pass through the same channel any file you'd manually paste into ChatGPT would, and are not routed through any separate PromptDock server (there isn't one).</li>
+  <li><strong>Saved chat links</strong> (the "🔗 Saved Chats" feature) store only the URL of a ChatGPT conversation tab you explicitly chose to save, plus the name of the PDF you were working from. This is stored locally the same way, and is never sent anywhere else.</li>
+  <li><strong>Autosolve</strong> automates typing and submitting text into ChatGPT's own input box — it does not read or store ChatGPT's responses, and does not communicate with any third-party service.</li>
+</ul>
+
+<h2>What PromptDock does NOT do</h2>
+<ul>
+  <li>It does not have its own backend server — there is nothing to send your data to, even if it wanted to.</li>
+  <li>It does not use analytics, tracking pixels, or third-party advertising SDKs.</li>
+  <li>It does not sell or share data with advertisers or data brokers.</li>
+  <li>It does not read or interact with any site other than chatgpt.com and chat.openai.com.</li>
+</ul>
+
+<h2>Permissions explained</h2>
+<ul>
+  <li><strong>activeTab / scripting</strong> — used to inject the PromptDock panel into the ChatGPT page you're currently viewing.</li>
+  <li><strong>storage / unlimitedStorage</strong> — used to save PDFs you upload and chat links you choose to save, locally on your device, so you don't have to re-upload files each time. PDFs can be several megabytes each, which is why the higher storage allowance is requested.</li>
+  <li><strong>Host permission for chatgpt.com / chat.openai.com</strong> — required so the extension can display its panel and insert content into ChatGPT's chat box on those specific sites only.</li>
+</ul>
+
+<h2>Removing your data</h2>
+<p>You can delete any saved PDF or chat link directly inside the extension's panel (📚 Library and 🔗 Saved Chats sections each have a delete button). Uninstalling the extension removes all locally stored data along with it.</p>
+
+<h2>Changes to this policy</h2>
+<p>If this policy changes, the update will be reflected on this page with a new "Last updated" date.</p>
+
+<h2>Contact</h2>
+<p>Questions about this extension can be directed via <a href="https://www.instagram.com/ifo.ish" target="_blank" rel="noopener noreferrer">Instagram @ifo.ish</a>.</p>
+
+</body>
+</html>
