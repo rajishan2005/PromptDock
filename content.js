@@ -1266,10 +1266,11 @@
   }
 
   // ---- question extraction -------------------------------------------------
-  // Matches "1. text", "1) text", "Q1. text", and bare table-style "1  text"
-  // (a number in its own column, no punctuation, followed by whitespace + a
-  // capital letter so we don't accidentally match numbers inside sentences).
-  const Q_START = /^(?:Q\.?\s*)?(\d{1,3})[\.\)]?\s+(?=[A-Z(])/;
+  // Matches "1. text", "1) text", "1.text" (no space after punctuation —
+  // common in some PDFs), "Q1. text", and bare table-style "1  text" (a
+  // number in its own column, no punctuation at all, so a space is required
+  // there to avoid matching numbers inside ordinary sentences).
+  const Q_START = /^(?:Q\.?\s*)?(?:(\d{1,3})[\.\)]\s*(?=[A-Z(])|(\d{1,3})\s+(?=[A-Z(]))/;
 
   async function getPageLines(pageIndex) {
     const page = await state.pdfDoc.getPage(pageIndex);
@@ -1289,9 +1290,15 @@
   // body text (measurements, options, etc.) don't get mistaken for a new
   // question — a line only starts a new question if it continues the
   // sequence (or is the very first match found).
-  // Detects unit/section header lines (e.g. "UNIT-1", "UNIT 5", "Unit-III") so
-  // numbering resets there instead of continuing from the previous unit.
+  // Detects section-header lines that signal numbering should restart —
+  // "UNIT-1" style unit headers, "Question Bank" labels, and mark-based
+  // subsection labels like "4 mark questions" (VTU-style papers often
+  // restart at 1 for each mark-value section). Without this, an unrelated
+  // numbered list earlier in the document (e.g. "1. Enhanced yield 2. ...")
+  // can "use up" numbers 1-4, leaving the real question list — which
+  // restarts at 1 further down — mistaken for leftover continuation text.
   const UNIT_HEADER = /^UNIT[\s\-.]*([IVXLC\d]+)\b/i;
+  const SECTION_RESET = /^(?:UNIT[\s\-.]*[IVXLC\d]+\b|Question\s*Bank\b|\d{1,2}\s*marks?\s*questions?\b)/i;
 
   function extractQuestions(lineEntries) {
     const found = [];
@@ -1300,8 +1307,7 @@
     let unit = null;
 
     lineEntries.forEach(({ line, page }) => {
-      const unitMatch = line.match(UNIT_HEADER);
-      if (unitMatch) {
+      if (SECTION_RESET.test(line)) {
         if (current) { found.push(current); current = null; }
         expected = null;
         unit = line.trim();
@@ -1309,7 +1315,7 @@
       }
 
       const m = line.match(Q_START);
-      const num = m ? parseInt(m[1], 10) : null;
+      const num = m ? parseInt(m[1] || m[2], 10) : null;
 
       if (m && (expected === null || num === expected)) {
         if (current) found.push(current);
@@ -1339,8 +1345,7 @@
     let n = 0;
 
     lineEntries.forEach(({ line, page }) => {
-      const unitMatch = line.match(UNIT_HEADER);
-      if (unitMatch) {
+      if (SECTION_RESET.test(line)) {
         if (current) { found.push(current); current = null; }
         unit = line.trim();
         return;
