@@ -10,6 +10,7 @@ A Chrome/Brave extension that docks a clean panel onto chatgpt.com so you can:
    - **Custom instructions box** (optional) — anything typed here (e.g. "only key points", "keep it a summary") is appended to that same priming message.
 5. **Question bank store** (🏪 button in the header) — browse a shared library of question-bank PDFs organized by stream → semester → subject, hosted in a public GitHub repo, and load any of them straight into PromptDock with one click.
 6. **Saved chat links** (🔗 button in the header) — save the current ChatGPT conversation's URL, tagged to whichever PDF + page you were on, so you can jump straight back to a module and its answers later.
+7. **Pixel cat study buddy** (🐱 button in the header) — a small 8-bit cat that hops out and sits near your chat box. Click it to set a focus timer on a scroll-wheel MM:SS picker; it naps for that long, then wakes up hungry — click it again to feed it. Quiet by design: minimal motion while idle/asleep, no popups or sounds.
 
 ## Install (unpacked, ~30 seconds)
 

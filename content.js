@@ -178,6 +178,7 @@
       <button class="pd-icon-btn" id="pd-lib-btn" title="PDF library">📚</button>
       <button class="pd-icon-btn" id="pd-chats-btn" title="Saved chat links">🔗</button>
       <button class="pd-icon-btn" id="pd-store-btn" title="Question bank store">🏪</button>
+      <button class="pd-icon-btn" id="pd-cat-btn" title="Study buddy">🐱</button>
       <button class="pd-close" id="pd-close" title="Close">✕</button>
     </div>
     <div class="pd-tabs">
@@ -1395,6 +1396,326 @@
     state.scanning = false;
     render();
   }
+
+  // ---- pixel-cat study buddy ------------------------------------------------
+  // A small 8-bit style cat that peeks out of the panel, sits near the chat
+  // box, naps for a set time, then wakes up hungry. Deliberately quiet when
+  // idle/asleep — this is a companion, not a notification generator.
+
+  const CAT_PX = 3; // size of one "pixel" in real px — keeps the sprite small
+
+  // Shared base body (16x16 grid). '.' = transparent.
+  const CAT_BODY = [
+    "....OO....OO....",
+    "...OOOO..OOOO...",
+    "..OOOOOOOOOOOO..",
+    "..OOOPOOOOPOOO..",
+    ".OOOOOOOOOOOOOO.",
+    ".OOOOOOOOOOOOOO.",
+    ".OOEEOOOOOOEEOO.",
+    ".OOOOOOPPOOOOOO.",
+    ".OOOOOWWWWOOOOO.",
+    ".OOWWWWWWWWWWOO.",
+    ".OWWWWWWWWWWWWO.",
+    "OOWWWWWWWWWWWWOO",
+    "OOWWWWWWWWWWWWOO",
+    ".OOWWWWWWWWWWOO.",
+    "..OOOOOOOOOOOO..",
+    "...OO......OO...",
+  ];
+  // 'E' cells mark where eyes go — swapped per pose below.
+  const CAT_EYES = {
+    open: ["EE", "EE"], // simple open dot-eyes (drawn as K)
+    blink: ["--", "--"], // thin closed line
+    happy: ["^^", "^^"], // closed happy arcs (approximated with ^ glyph, drawn as K)
+    wide: ["OO", "OO"], // big alert eyes (drawn larger, still K)
+  };
+  const CAT_PALETTE = { O: "#e8a33d", W: "#fff6e6", P: "#f4a3c1", K: "#2a1f14" };
+
+  function pixelGridToSvgRects(grid, palette, offsetXPx = 0, offsetYPx = 0, px = CAT_PX) {
+    let out = "";
+    for (let row = 0; row < grid.length; row++) {
+      const line = grid[row];
+      for (let col = 0; col < line.length; col++) {
+        const ch = line[col];
+        const color = palette[ch];
+        if (!color) continue;
+        const x = offsetXPx + col * px;
+        const y = offsetYPx + row * px;
+        out += `<rect x="${x}" y="${y}" width="${px}" height="${px}" fill="${color}"/>`;
+      }
+    }
+    return out;
+  }
+
+  function buildCatBodySvg(eyeStyle) {
+    const grid = CAT_BODY.map((row) => row.split(""));
+    const [leftEye, rightEye] = CAT_EYES[eyeStyle] || CAT_EYES.open;
+    // Eyes sit at row 6, columns 3-4 and 11-12 in the base grid.
+    grid[6][3] = leftEye[0]; grid[6][4] = leftEye[1];
+    grid[6][11] = rightEye[0]; grid[6][12] = rightEye[1];
+    const flatGrid = grid.map((r) => r.join(""));
+    const paletteWithEyes = { ...CAT_PALETTE, "-": "#2a1f14", "^": "#2a1f14" };
+    return pixelGridToSvgRects(flatGrid, paletteWithEyes);
+  }
+
+  function buildCatSvg(pose) {
+    const w = 16 * CAT_PX;
+    const h = 16 * CAT_PX;
+    const eyeStyle = pose === "asleep" ? "blink" : pose === "happy" || pose === "eating" ? "happy" : pose === "hungry" ? "wide" : "open";
+    let extras = "";
+
+    if (pose === "asleep") {
+      extras += `<g class="cat-zzz">
+        <text x="${w - 6}" y="8" font-size="7" fill="#8a7bc4" font-family="monospace">z</text>
+        <text x="${w + 2}" y="2" font-size="9" fill="#8a7bc4" font-family="monospace">z</text>
+      </g>`;
+    } else if (pose === "hungry") {
+      extras += `<g class="cat-alert">
+        <rect x="${w / 2 - 2}" y="-14" width="4" height="10" fill="#f4a3c1"/>
+        <rect x="${w / 2 - 2}" y="-3" width="4" height="4" fill="#f4a3c1"/>
+      </g>`;
+    } else if (pose === "eating") {
+      extras += `<g class="cat-bowl"><ellipse cx="${w / 2}" cy="${h + 3}" rx="10" ry="4" fill="#b18cff"/></g>`;
+    } else if (pose === "happy") {
+      extras += `<g class="cat-hearts">
+        <text x="${w - 4}" y="6" font-size="8" fill="#ff8fb1">♥</text>
+      </g>`;
+    }
+
+    const body = buildCatBodySvg(eyeStyle);
+    const dip = pose === "eating" ? `class="cat-eating-dip"` : "";
+    return `<svg class="pd-cat-svg" viewBox="-16 -16 ${w + 32} ${h + 16}" width="${w}" height="${h}">
+      <g ${dip}>${body}${extras}</g>
+    </svg>`;
+  }
+
+  // ---- state + DOM for the companion ----------------------------------------
+  const cat = {
+    el: null,
+    popupEl: null,
+    visible: false,
+    pose: "idle", // idle | asleep | hungry | eating | happy
+    minutes: 0,
+    seconds: 0,
+    remainingMs: 0,
+    intervalId: null,
+    hintPlayed: false,
+  };
+
+  function findChatAnchor() {
+    const editor = getEditor();
+    if (editor) return editor.getBoundingClientRect();
+    return null;
+  }
+
+  function catRestPosition() {
+    const rect = findChatAnchor();
+    if (rect) {
+      // Sit just above-left of the chat box, not on top of it.
+      return { left: Math.max(12, rect.left + 12), top: rect.top - 74 };
+    }
+    // Fallback if we can't find ChatGPT's input (layout changed, etc.)
+    return { left: window.innerWidth / 2 - 24, top: window.innerHeight - 160 };
+  }
+
+  function catStartPosition() {
+    const fabRect = fab.getBoundingClientRect();
+    return { left: window.innerWidth - 10, top: fabRect.top };
+  }
+
+  function renderCatPose() {
+    if (!cat.el) return;
+    cat.el.innerHTML = buildCatSvg(cat.pose);
+    cat.el.className = `pd-cat pd-cat-${cat.pose}`;
+  }
+
+  function showCat() {
+    if (cat.visible) return;
+    cat.visible = true;
+    cat.pose = "idle";
+
+    const start = catStartPosition();
+    const rest = catRestPosition();
+
+    cat.el = document.createElement("div");
+    cat.el.className = "pd-cat pd-cat-idle pd-cat-traveling";
+    cat.el.style.left = `${start.left}px`;
+    cat.el.style.top = `${start.top}px`;
+    cat.el.style.opacity = "0";
+    document.body.appendChild(cat.el);
+    renderCatPose();
+
+    cat.el.addEventListener("click", onCatClick);
+
+    // Force layout, then animate to its resting spot near the chat box.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        cat.el.style.left = `${rest.left}px`;
+        cat.el.style.top = `${rest.top}px`;
+        cat.el.style.opacity = "1";
+      });
+    });
+
+    setTimeout(() => cat.el && cat.el.classList.remove("pd-cat-traveling"), 750);
+  }
+
+  function hideCat() {
+    if (!cat.visible) return;
+    cat.visible = false;
+    closeCatPopup();
+    if (cat.intervalId) { clearInterval(cat.intervalId); cat.intervalId = null; }
+    if (cat.el) { cat.el.remove(); cat.el = null; }
+    cat.pose = "idle";
+  }
+
+  function onCatClick() {
+    if (cat.pose === "idle") {
+      openCatPopup();
+    } else if (cat.pose === "asleep") {
+      // tap to cancel the nap early
+      if (cat.intervalId) { clearInterval(cat.intervalId); cat.intervalId = null; }
+      cat.pose = "idle";
+      renderCatPose();
+      showToast("Nap cancelled.");
+    } else if (cat.pose === "hungry") {
+      feedCat();
+    }
+  }
+
+  // ---- the MM:SS scroll-wheel timer popup ----------------------------------
+  const WHEEL_ROW_H = 30;
+  const WHEEL_VISIBLE_ROWS = 3;
+
+  function buildWheelHtml(id, max) {
+    const rows = [];
+    for (let i = 0; i <= max; i++) rows.push(`<div class="pd-wheel-row">${String(i).padStart(2, "0")}</div>`);
+    return `<div class="pd-wheel" id="${id}" style="height:${WHEEL_ROW_H * WHEEL_VISIBLE_ROWS}px">
+      <div class="pd-wheel-pad" style="height:${WHEEL_ROW_H}px"></div>
+      ${rows.join("")}
+      <div class="pd-wheel-pad" style="height:${WHEEL_ROW_H}px"></div>
+    </div>`;
+  }
+
+  function readWheelValue(wheelEl) {
+    return Math.round(wheelEl.scrollTop / WHEEL_ROW_H);
+  }
+
+  function setWheelValue(wheelEl, value, smooth = false) {
+    wheelEl.scrollTo({ top: value * WHEEL_ROW_H, behavior: smooth ? "smooth" : "auto" });
+  }
+
+  function openCatPopup() {
+    closeCatPopup();
+    const rect = cat.el.getBoundingClientRect();
+
+    const popup = document.createElement("div");
+    popup.className = "pd-cat-popup";
+    popup.style.left = `${rect.left - 10}px`;
+    popup.style.top = `${rect.top - 132}px`;
+    popup.innerHTML = `
+      <div class="pd-cat-popup-title">Lock in for how long?</div>
+      <div class="pd-wheel-row-wrap">
+        ${buildWheelHtml("pd-wheel-min", 99)}
+        <div class="pd-wheel-colon">:</div>
+        ${buildWheelHtml("pd-wheel-sec", 59)}
+      </div>
+      <button class="pd-btn pd-btn-primary" id="pd-cat-start" style="margin-top:10px">Start</button>
+    `;
+    document.body.appendChild(popup);
+    cat.popupEl = popup;
+
+    const minWheel = popup.querySelector("#pd-wheel-min");
+    const secWheel = popup.querySelector("#pd-wheel-sec");
+    setWheelValue(minWheel, cat.minutes || 25);
+    setWheelValue(secWheel, cat.seconds || 0);
+
+    let minScrollTimer = null, secScrollTimer = null;
+    minWheel.addEventListener("scroll", () => {
+      clearTimeout(minScrollTimer);
+      minScrollTimer = setTimeout(() => setWheelValue(minWheel, readWheelValue(minWheel), true), 120);
+    });
+    secWheel.addEventListener("scroll", () => {
+      clearTimeout(secScrollTimer);
+      secScrollTimer = setTimeout(() => setWheelValue(secWheel, readWheelValue(secWheel), true), 120);
+    });
+
+    // First time this popup is opened, give the minutes wheel one gentle
+    // nudge so it's obvious it's scrollable — purely a hint, settles back.
+    if (!cat.hintPlayed) {
+      cat.hintPlayed = true;
+      setTimeout(() => {
+        const originalTop = minWheel.scrollTop;
+        minWheel.scrollTo({ top: originalTop + WHEEL_ROW_H, behavior: "smooth" });
+        setTimeout(() => minWheel.scrollTo({ top: originalTop, behavior: "smooth" }), 420);
+      }, 250);
+    }
+
+    popup.querySelector("#pd-cat-start").addEventListener("click", () => {
+      cat.minutes = readWheelValue(minWheel);
+      cat.seconds = readWheelValue(secWheel);
+      closeCatPopup();
+      startCatNap();
+    });
+
+    // Close if the user clicks elsewhere.
+    setTimeout(() => {
+      document.addEventListener("click", handleOutsideCatPopupClick, { capture: true });
+    }, 0);
+  }
+
+  function handleOutsideCatPopupClick(e) {
+    if (!cat.popupEl) return;
+    if (cat.popupEl.contains(e.target) || (cat.el && cat.el.contains(e.target))) return;
+    closeCatPopup();
+  }
+
+  function closeCatPopup() {
+    if (cat.popupEl) { cat.popupEl.remove(); cat.popupEl = null; }
+    document.removeEventListener("click", handleOutsideCatPopupClick, { capture: true });
+  }
+
+  function startCatNap() {
+    const totalMs = (cat.minutes * 60 + cat.seconds) * 1000;
+    if (totalMs <= 0) { showToast("Set a time above 0 first."); return; }
+    cat.remainingMs = totalMs;
+    cat.pose = "asleep";
+    renderCatPose();
+
+    if (cat.intervalId) clearInterval(cat.intervalId);
+    cat.intervalId = setInterval(() => {
+      cat.remainingMs -= 1000;
+      if (cat.el) {
+        const m = Math.max(0, Math.ceil(cat.remainingMs / 60000));
+        cat.el.title = cat.remainingMs > 0 ? `Napping — ~${m} min left` : "Feeding time!";
+      }
+      if (cat.remainingMs <= 0) {
+        clearInterval(cat.intervalId);
+        cat.intervalId = null;
+        cat.pose = "hungry";
+        renderCatPose();
+        showToast("🐾 Feeding time!");
+      }
+    }, 1000);
+  }
+
+  function feedCat() {
+    cat.pose = "eating";
+    renderCatPose();
+    setTimeout(() => {
+      cat.pose = "happy";
+      renderCatPose();
+      setTimeout(() => {
+        cat.pose = "idle";
+        renderCatPose();
+      }, 1600);
+    }, 1400);
+  }
+
+  root.querySelector("#pd-cat-btn").addEventListener("click", () => {
+    if (cat.visible) hideCat();
+    else showCat();
+  });
 
   // Render the initial view right away (even while hidden) so the very first
   // time the panel is opened, the dropzone/tab content is already there and
