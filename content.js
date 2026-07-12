@@ -456,8 +456,29 @@
     return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  // Detects the classic "extension context invalidated" situation: this
+  // happens when the extension is reloaded/updated in chrome://extensions
+  // while a ChatGPT tab was already open — that tab keeps running the OLD
+  // content script, whose connection to chrome.* APIs has been severed, so
+  // chrome.storage silently becomes undefined. Refreshing the tab fixes it;
+  // this just lets us fail with a clear message instead of a raw TypeError.
+  function isExtensionContextValid() {
+    try {
+      return !!(chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function warnIfExtensionContextInvalid() {
+    if (isExtensionContextValid()) return true;
+    showToast("PromptDock was updated — please refresh this tab to keep using it.");
+    return false;
+  }
+
   // ---- PDF library (chrome.storage.local) ----------------------------------
   async function saveToLibrary({ name, size, numPages, dataUrl }) {
+    if (!warnIfExtensionContextInvalid()) return;
     const id = `${Date.now()}`;
     const key = `pdfLib:${id}`;
     const { pdfLibIndex = [] } = await chrome.storage.local.get("pdfLibIndex");
@@ -469,6 +490,7 @@
   }
 
   async function deleteLibraryEntry(id) {
+    if (!warnIfExtensionContextInvalid()) return;
     const key = `pdfLib:${id}`;
     const { pdfLibIndex = [] } = await chrome.storage.local.get("pdfLibIndex");
     await chrome.storage.local.remove(key);
@@ -493,6 +515,16 @@
 
   async function renderLibraryOverlay() {
     bodyEl.innerHTML = `<div class="pd-card"><div class="pd-card-title">Loading library…</div></div>`;
+    if (!warnIfExtensionContextInvalid()) {
+      bodyEl.innerHTML = `
+        <div class="pd-hint" style="margin:0 0 4px 0">← click a tab above to go back</div>
+        <div class="pd-card">
+          <div class="pd-card-title">Your PDF library</div>
+          <div class="pd-empty">PromptDock was updated — please refresh this tab to load your library.</div>
+        </div>
+      `;
+      return;
+    }
     let entries = [];
     try {
       const { pdfLibIndex = [] } = await chrome.storage.local.get("pdfLibIndex");
@@ -530,6 +562,7 @@
 
     bodyEl.querySelectorAll("[data-open]").forEach((btn) => {
       btn.addEventListener("click", async () => {
+        if (!warnIfExtensionContextInvalid()) return;
         const id = btn.dataset.open;
         const key = `pdfLib:${id}`;
         const res = await chrome.storage.local.get(key);
@@ -558,6 +591,7 @@
 
   // ---- saved chat links -----------------------------------------------------
   async function saveCurrentChatLink() {
+    if (!warnIfExtensionContextInvalid()) return;
     const { chatLinks = [] } = await chrome.storage.local.get("chatLinks");
     chatLinks.push({
       id: `${Date.now()}`,
@@ -573,6 +607,16 @@
 
   async function renderChatsOverlay() {
     bodyEl.innerHTML = `<div class="pd-card"><div class="pd-card-title">Loading…</div></div>`;
+    if (!warnIfExtensionContextInvalid()) {
+      bodyEl.innerHTML = `
+        <div class="pd-hint" style="margin:0 0 4px 0">← click a tab above to go back</div>
+        <div class="pd-card">
+          <div class="pd-card-title">Saved chats</div>
+          <div class="pd-empty">PromptDock was updated — please refresh this tab to continue.</div>
+        </div>
+      `;
+      return;
+    }
     const { chatLinks = [] } = await chrome.storage.local.get("chatLinks");
     const ordered = chatLinks.slice().reverse();
 
@@ -615,6 +659,7 @@
     });
     bodyEl.querySelectorAll("[data-del-chat]").forEach((btn) => {
       btn.addEventListener("click", async () => {
+        if (!warnIfExtensionContextInvalid()) return;
         const { chatLinks: current = [] } = await chrome.storage.local.get("chatLinks");
         const next = current.filter((c) => c.id !== btn.dataset.delChat);
         await chrome.storage.local.set({ chatLinks: next });
