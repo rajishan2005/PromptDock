@@ -94,7 +94,7 @@ PromptDock bundles **PDF.js ${PDFJS_VERSION}**, an open-source PDF rendering and
 - License: Apache License 2.0
 - Source/project: https://github.com/mozilla/pdf.js
 - Package: https://www.npmjs.com/package/pdfjs-dist/v/${PDFJS_VERSION}
-- Bundled files: `libs/pdf.js` and `libs/pdf.worker.js`
+- Bundled files: libs/pdf.js and libs/pdf.worker.js
 
 PromptDock uses the official unminified UMD build so the extension's submitted JavaScript remains readable for Chrome Web Store review.
 EOF
